@@ -153,7 +153,7 @@ Select the most important task from the implementation plan, implement it correc
    - Add tests if they don't exist
 
 4. Validate
-   - Run: [VALIDATION_COMMANDS]
+   - Run: {{VALIDATION_COMMANDS}}
    - Use only 1 Sonnet subagent for build/tests (creates backpressure)
    - If validation fails, fix and retry
    - Do not commit until validation passes

@@ -4,6 +4,9 @@
 
 set -e  # Exit on error
 
+# Resolve script directory for sourcing helpers
+LOOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Verify Claude CLI is installed
 if ! command -v claude &>/dev/null; then
   echo "Error: Claude CLI not found"
@@ -39,7 +42,9 @@ validate_model "$MODEL"
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"  # Max failures on same task before skipping
 PLAN_FILE="IMPLEMENTATION_PLAN.md"
 REPORT_FILE="REPORT.md"
+ACCUMULATED_REPORT_FILE="REPORT.accumulated.md"
 LOG_FILE="ralph.log"
+ACCUMULATED_LOG_FILE="ralph.accumulated.log"
 START_TIME=$(date +%s)
 BACKUP_ENABLED="${RALPH_BACKUP:-true}"  # Push to remote after each commit
 PROJECT_NAME=$(basename "$(pwd)")
@@ -97,7 +102,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 [plan] [limit] [--verbose] [--model opus|sonnet]"
+      echo "Usage: $0 [plan] [limit] [--verbose] [--model opus|sonnet|haiku]"
       echo ""
       echo "Examples:"
       echo "  $0              # Build mode, unlimited (exits when all tasks done)"
@@ -106,10 +111,11 @@ while [[ $# -gt 0 ]]; do
       echo "  $0 plan 5       # Plan mode, max 5 iterations"
       echo "  $0 --verbose    # Enable verbose logging"
       echo "  $0 --model sonnet  # Use Sonnet instead of Opus"
+      echo "  $0 --model haiku   # Use Haiku for simple tasks"
       echo ""
       echo "Environment variables:"
-      echo "  RALPH_MODEL=opus|sonnet    Default model"
-      echo "  RALPH_MAX_STUCK=3          Max failures before skipping task"
+      echo "  RALPH_MODEL=opus|sonnet|haiku    Default model"
+      echo "  RALPH_MAX_STUCK=3                Max failures before skipping task"
       exit 1
       ;;
   esac
@@ -199,6 +205,13 @@ check_all_tasks_complete() {
     if [ "$completed" -gt 0 ]; then
       return 0  # All tasks complete
     fi
+
+    # All remaining tasks are skipped — nothing left to execute
+    local skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+    if [ "$skipped" -gt 0 ]; then
+      echo "All remaining tasks are skipped — nothing to execute"
+      return 0
+    fi
   fi
 
   return 1  # Still have incomplete tasks
@@ -214,72 +227,11 @@ get_current_task() {
 }
 
 # ============================================================================
-# STUCK DETECTION
+# STUCK DETECTION (sourced from shared module)
 # ============================================================================
 
 STUCK_FILE=".ralph_stuck_tracker"
-LAST_TASK=""
-STUCK_COUNT=0
-
-init_stuck_tracker() {
-  if [ -f "$STUCK_FILE" ]; then
-    # Security: Use safe parsing instead of source (prevents shell injection)
-    LAST_TASK=$(grep "^LAST_TASK=" "$STUCK_FILE" 2>/dev/null | cut -d'"' -f2 || echo "")
-    STUCK_COUNT=$(grep "^STUCK_COUNT=" "$STUCK_FILE" 2>/dev/null | cut -d= -f2 || echo "0")
-    # Ensure STUCK_COUNT is a number
-    [[ "$STUCK_COUNT" =~ ^[0-9]+$ ]] || STUCK_COUNT=0
-  else
-    LAST_TASK=""
-    STUCK_COUNT=0
-  fi
-}
-
-update_stuck_tracker() {
-  local current_task="$1"
-
-  if [ "$current_task" = "$LAST_TASK" ] && [ -n "$current_task" ]; then
-    STUCK_COUNT=$((STUCK_COUNT + 1))
-  else
-    LAST_TASK="$current_task"
-    STUCK_COUNT=1
-  fi
-
-  echo "LAST_TASK=\"$LAST_TASK\"" > "$STUCK_FILE"
-  echo "STUCK_COUNT=$STUCK_COUNT" >> "$STUCK_FILE"
-}
-
-is_stuck() {
-  [ "$STUCK_COUNT" -ge "$MAX_STUCK" ]
-}
-
-skip_stuck_task() {
-  local task="$1"
-  echo ""
-  echo "STUCK: Failed $MAX_STUCK times on: $task"
-  echo "Marking as blocked and moving on..."
-
-  # Add to blockers section or create it
-  # Note: We append to end instead of inserting after header (simpler, more portable)
-  if ! grep -q "^## Blocked" "$PLAN_FILE" 2>/dev/null; then
-    # Create Blocked section at end
-    echo "" >> "$PLAN_FILE"
-    echo "## Blocked" >> "$PLAN_FILE"
-    echo "" >> "$PLAN_FILE"
-  fi
-  echo "- $task (stuck after $MAX_STUCK attempts)" >> "$PLAN_FILE"
-
-  # Mark the task as skipped in place (change [ ] to [S])
-  # Escape regex metacharacters in task name for safe substitution
-  local escaped_task
-  escaped_task=$(printf '%s\n' "$task" | sed 's/[[\.*^$()+?{|/]/\\&/g')
-  sed_i "s/- \[ \] ${escaped_task}/- [S] $task/" "$PLAN_FILE"
-
-  # Reset stuck counter
-  LAST_TASK=""
-  STUCK_COUNT=0
-  echo "LAST_TASK=\"\"" > "$STUCK_FILE"
-  echo "STUCK_COUNT=0" >> "$STUCK_FILE"
-}
+source "$LOOP_DIR/scripts/stuck-tracker.sh"
 
 # ============================================================================
 # ITERATION SUMMARY
@@ -365,13 +317,25 @@ generate_report() {
   local minutes=$((duration / 60))
   local seconds=$((duration % 60))
 
-  local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null || echo "0")
-  local skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null || echo "0")
-  local remaining=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null || echo "0")
+  # local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+  # local skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+  # local remaining=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null || echo "0")
+  # local total=$((completed + skipped + remaining))
+
+  local completed=$(grep -c '^[[:space:]]*- \[x\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
+  local skipped=$(grep -c '^[[:space:]]*- \[S\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
+  local remaining=$(grep -c '^[[:space:]]*- \[ \]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
   local total=$((completed + skipped + remaining))
+
 
   local commit_count=$(git rev-list --count HEAD 2>/dev/null || echo "0")
   local files_changed=$(git diff --name-only $(git rev-list --max-parents=0 HEAD 2>/dev/null) HEAD 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+
+
+  if [ -f "$REPORT_FILE" ]; then
+    echo "Saving previous report to accumulated report..."
+    cat $REPORT_FILE >> $ACCUMULATED_REPORT_FILE
+  fi
 
   cat > "$REPORT_FILE" << EOF
 # Ralph Session Report
@@ -461,8 +425,10 @@ cleanup() {
     generate_report "$exit_reason" "$exit_code"
   fi
 
-  # Clean up stuck tracker
-  rm -f "$STUCK_FILE"
+  # Clean up stuck tracker (skip in orchestrated mode — orchestrator owns the lifecycle)
+  if [ "$RALPH_ORCHESTRATED" != "true" ]; then
+    rm -f "$STUCK_FILE"
+  fi
 
   echo "============================================"
 }
@@ -486,7 +452,7 @@ else
   if [ ! -f "$PLAN_FILE" ]; then
     echo ""
     echo "Error: $PLAN_FILE not found"
-    echo "Run './loop.sh plan' first to generate the implementation plan."
+    echo "Run './orchestrator.sh plan' first to generate the implementation plan."
     exit 1
   fi
 
@@ -526,6 +492,11 @@ echo ""
 echo "Starting loop..."
 echo "---"
 echo ""
+
+# Save previous log file contents into Accumulate log file so that we don't lose previous logs
+if [ -f "$LOG_FILE" ] ; then
+  cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
+fi
 
 # Initialize log file
 echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"

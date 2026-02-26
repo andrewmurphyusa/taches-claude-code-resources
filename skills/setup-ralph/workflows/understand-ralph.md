@@ -13,7 +13,7 @@ Ask the user using AskUserQuestion:
 
 Options:
 1. **The core concept** - What Ralph is and why it works
-2. **The three phases** - Planning, building, and observation
+2. **The four phases** - Planning, decompose, building, and observation
 3. **Backpressure** - How tests and validation steer Ralph
 4. **AGENTS.md** - How to capture and evolve learnings
 5. **When to use Ralph** - Is it right for my project?
@@ -58,11 +58,11 @@ The insight: "Deterministically bad in an undeterministic world"
 - Plan on disk provides deterministic shared state
 ```
 
-### If "The three phases":
+### If "The four phases":
 
 Explain:
 ```
-Ralph has three distinct phases:
+Ralph has four distinct phases:
 
 PHASE 1: PLANNING
 - Objective: Gap analysis only
@@ -71,9 +71,17 @@ PHASE 1: PLANNING
 - Rule: No implementation, no commits
 - Key instruction: "Don't assume not implemented; confirm with code search"
 
-Run with: ./loop.sh plan
+Run with: ./orchestrator.sh plan
 
-PHASE 2: BUILDING
+PHASE 2: DECOMPOSE (Optional)
+- Objective: Split complex tasks before execution
+- Input: IMPLEMENTATION_PLAN.md
+- Output: Updated plan with tier-annotated subtasks [opus]/[sonnet]/[haiku]
+- Rule: Only modifies IMPLEMENTATION_PLAN.md, never touches code
+
+Run with: ./orchestrator.sh decompose
+
+PHASE 3: BUILDING
 - Objective: Implement from the plan
 - Input: Plan, specs, existing code
 - Output: Code changes + commits
@@ -88,9 +96,9 @@ Process each iteration:
 6. Commit changes
 7. Exit (fresh context next iteration)
 
-Run with: ./loop.sh
+Run with: ./orchestrator.sh
 
-PHASE 3: OBSERVATION (Your Role)
+PHASE 4: OBSERVATION (Your Role)
 - Objective: Sit on the loop, not in it
 - Action: Engineer the environment
 

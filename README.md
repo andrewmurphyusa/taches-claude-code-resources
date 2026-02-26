@@ -1,16 +1,16 @@
-# TÂCHES Claude Code Resources
+# TÂCHES Claude Code Resources (voodoobunny fork)
 
 A growing collection of custom Claude Code resources built for real workflows.
 
 ## Philosophy
 
-When you use a tool like Claude Code, it's your responsibility to assume everything is possible.
+> "When you use a tool like Claude Code, it's your responsibility to assume everything is possible. I built these tools using that mindset. Dream big. Happy building." — TÂCHES
 
-I built these tools using that mindset.
+This is a personal fork by **Andrew Murphy** ([@andrewmurphyusa](https://github.com/andrewmurphyusa)) of the original [taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources) by Lex Christopherson (TÂCHES). Almost all credit belongs to TÂCHES — I made only minor changes. See [What I Changed](#what-i-changed) below.
 
-Dream big. Happy building.
+## What I Changed
 
-— TÂCHES
+- **Setup Ralph** — Upgraded the `setup-ralph` skill to deploy an improved Ralph loop with an orchestrator layer (dynamic model routing, infrastructure error recovery, task decomposition). All other skills, commands, and agents are unchanged from the original.
 
 ## What's Inside
 
@@ -42,10 +42,10 @@ Dream big. Happy building.
 
 ```bash
 # Add the marketplace
-claude plugin marketplace add glittercowboy/taches-cc-resources
+claude plugin marketplace add andrewmurphyusa/taches-claude-code-resources@improved-ralph
 
 # Install the plugin
-claude plugin install taches-cc-resources
+claude plugin install voodoobunny-fork-of-taches-cc-resources
 ```
 
 Start a new Claude Code session to use the commands and skills.
@@ -54,8 +54,8 @@ Start a new Claude Code session to use the commands and skills.
 
 ```bash
 # Clone the repo
-git clone https://github.com/glittercowboy/taches-cc-resources.git
-cd taches-cc-resources
+git clone -b improved-ralph https://github.com/andrewmurphyusa/taches-claude-code-resources.git
+cd taches-claude-code-resources
 
 # Install commands
 cp -r commands/* ~/.claude/commands/
@@ -217,11 +217,13 @@ Commands: `/debug`
 
 ### [Setup Ralph](./skills/setup-ralph/)
 
-Set up Geoffrey Huntley's Ralph Wiggum autonomous coding loop. Ralph is an autonomous AI coding methodology that uses iterative loops with task selection, execution, and validation. Fresh context every iteration prevents context poisoning.
+Set up an improved Ralph Wiggum autonomous coding loop. Based on Geoffrey Huntley's original technique — extended with an orchestrator layer for dynamic model routing, infrastructure error recovery, and task decomposition.
 
-**Three phases:** Planning (gap analysis → TODO list), Building (implement one task, validate, commit), Observation (you engineer the environment).
+**Four phases:** Planning (gap analysis → TODO list), Decompose (split complex tasks into tier-annotated subtasks), Building (implement one task per iteration, validate, commit), Observation (you engineer the environment).
 
-**Key concepts:** Backpressure via tests/lints/builds, file I/O as state (IMPLEMENTATION_PLAN.md), parallel subagents for reads, prompts evolve through observation.
+**Key concepts:** Dynamic model routing (haiku/sonnet/opus per task), automatic error recovery (rate limits, usage exhaustion, overload), backpressure via tests/lints/builds, file I/O as state (IMPLEMENTATION_PLAN.md).
+
+**Primary command:** `./orchestrator.sh` (not `./loop.sh` directly)
 
 Commands: `/setup-ralph`
 
@@ -245,4 +247,4 @@ More resources coming soon.
 
 **Community Ports:** [OpenCode](https://github.com/stephenschoettler/taches-oc-prompts)
 
-—TÂCHES
+**Original project:** [taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources) by Lex Christopherson (TÂCHES) — this fork lives at [andrewmurphyusa/taches-claude-code-resources](https://github.com/andrewmurphyusa/taches-claude-code-resources/tree/improved-ralph) (branch: `improved-ralph`).

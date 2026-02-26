@@ -3,7 +3,7 @@
 <required_reading>
 **Read these reference files NOW:**
 1. references/ralph-fundamentals.md (escape hatches section)
-2. references/validation-strategy.md (handling failures section)
+2. references/validation-strategy.md (handling failures section, infrastructure error recovery section)
 </required_reading>
 
 <process>
@@ -18,20 +18,35 @@ Options:
 3. **Validation keeps failing** - Tests/builds won't pass
 4. **Loop won't start** - Errors before first iteration
 5. **Performance issues** - Too slow, using too many resources
-6. **Other** - Describe the problem
+6. **API errors** - Rate limits, usage exhausted, overloaded
+7. **Other** - Describe the problem
 
 ## Step 2: Diagnose and Fix
 
 ### If "Ralph is stuck on a task":
 
-Check:
-1. Look at `.ralph_stuck_tracker` if it exists
-2. Check `ralph.log` for recent output
-3. Review `IMPLEMENTATION_PLAN.md` for the stuck task
+The orchestrator handles stuck detection automatically:
+- After **2 failures** on the same task, it escalates the model tier (haiku→sonnet→opus)
+- After **`RALPH_MAX_STUCK` failures** (default: 3), it marks the task `[S]` and moves on
+
+Check if the task was already auto-skipped:
+```bash
+grep '\[S\]' IMPLEMENTATION_PLAN.md
+grep 'Blocked' IMPLEMENTATION_PLAN.md
+```
+
+Check logs for what happened:
+```bash
+tail -100 ralph.log
+```
 
 Common causes and fixes:
 
 **Task is genuinely hard:**
+- Annotate it `[opus]` in `IMPLEMENTATION_PLAN.md` to force the strongest model:
+  ```
+  - [ ] [opus] Design the authentication architecture
+  ```
 - Break it into smaller tasks in the plan
 - Add more specific guidance to AGENTS.md
 - Clarify the spec for that feature
@@ -46,14 +61,16 @@ Common causes and fixes:
 - Check if another task should be done first
 - Reorder priorities in the plan
 
-**Stuck detection triggered incorrectly:**
+**Stuck threshold too low:**
 ```bash
-# Reset the stuck tracker
-rm .ralph_stuck_tracker
-
-# Increase threshold if tasks legitimately need retries
+# Increase threshold if tasks legitimately need more attempts
 export RALPH_MAX_STUCK=5
-./loop.sh
+./orchestrator.sh
+```
+
+**Reset the stuck tracker manually (if orchestrator is not running):**
+```bash
+rm .ralph_stuck_tracker
 ```
 
 ### If "Ralph went off track":
@@ -73,7 +90,10 @@ git reset --hard HEAD~[number]
 
 # Regenerate plan from current state
 rm IMPLEMENTATION_PLAN.md
-./loop.sh plan
+./orchestrator.sh plan
+
+# Optional: decompose complex tasks before rebuilding
+./orchestrator.sh decompose
 ```
 
 Then investigate WHY:
@@ -126,14 +146,25 @@ Then investigate WHY:
    # Edit AGENTS.md with what you learned
 
    # Resume
-   ./loop.sh
+   ./orchestrator.sh
    ```
 
 ### If "Loop won't start":
 
+**Check orchestrator and scripts exist:**
+```bash
+ls -la orchestrator.sh loop.sh scripts/
+```
+If missing, run setup again or restore from templates.
+
+**Check scripts are executable:**
+```bash
+chmod +x orchestrator.sh loop.sh scripts/*.sh
+```
+
 **Check prompt files exist:**
 ```bash
-ls -la PROMPT_plan.md PROMPT_build.md
+ls -la PROMPT_plan.md PROMPT_build.md PROMPT_decompose.md
 ```
 If missing, run setup again or create from templates.
 
@@ -160,19 +191,15 @@ chmod 600 ~/.claude-oauth-token
 ```bash
 ls IMPLEMENTATION_PLAN.md
 ```
-If missing, run `./loop.sh plan` first.
-
-**Check permissions:**
-```bash
-chmod +x loop.sh
-```
+If missing, run `./orchestrator.sh plan` first.
 
 ### If "Performance issues":
 
 **Too slow per iteration:**
-- Switch to Sonnet: `./loop.sh --model sonnet`
+- Let routing handle it — if tasks are genuinely simple, routing will already select haiku/sonnet
+- Force a faster model for all tasks: `./orchestrator.sh --model sonnet`
 - Reduce validation: Remove slow checks from PROMPT_build.md
-- Smaller tasks: Break tasks into smaller units
+- Smaller tasks: Break tasks into smaller units, or run `./orchestrator.sh decompose` first
 
 **Using too many resources:**
 - Reduce subagent counts in prompts (250 → 50)
@@ -183,9 +210,43 @@ chmod +x loop.sh
   ```
 
 **Too many API calls:**
-- Run fewer iterations: `./loop.sh 10`
+- Run fewer iterations: `./orchestrator.sh 10`
 - Increase sleep between iterations (edit loop.sh)
 - Use batch backup (reduce push frequency)
+
+### If "API errors":
+
+The orchestrator handles most API errors automatically. If you're seeing them in logs but the loop isn't recovering, here's what each means:
+
+**Rate limit (HTTP 429):**
+- Orchestrator applies exponential backoff (1s → 60s). You'll see "sleeping Xs" in output.
+- If it escalates to window sleep, that's expected — it computed the remaining window time.
+- If you see repeated rate limits that aren't recovering, check `ralph.log` for the pattern.
+
+**Usage exhausted (5-hour window):**
+- Orchestrator sleeps until the window resets. This can be several hours.
+- State is in `.ralph_window_start` — delete it to reset the tracking (not the actual limit).
+- Nothing to do but wait. The loop will resume automatically.
+
+**Overloaded:**
+- Orchestrator retries with 45s sleep, up to 3 times. Usually self-resolving.
+
+**Authentication failure:**
+- Loop stops immediately. Re-authenticate:
+  ```bash
+  claude setup-token
+  # Save to ~/.claude-oauth-token
+  chmod 600 ~/.claude-oauth-token
+  ```
+
+**Context too long:**
+- The specific task was automatically skipped (marked `[S]`).
+- Split the task into smaller pieces in `IMPLEMENTATION_PLAN.md`.
+- Or use `./orchestrator.sh decompose` to have Claude split it.
+
+**UNKNOWN error (non-zero exit, unrecognized output):**
+- Orchestrator propagates the exit code and stops.
+- Check `ralph.log` for the actual error message.
 
 ### If "Other":
 
@@ -220,21 +281,24 @@ git reset --hard [commit-hash]
 ```bash
 rm IMPLEMENTATION_PLAN.md
 rm .ralph_stuck_tracker
-./loop.sh plan
+./orchestrator.sh plan
 ```
 
 **Nuclear option - start completely over:**
 ```bash
-# Keep your source code, reset Ralph state
+# Keep your source code, reset all Ralph state
 rm IMPLEMENTATION_PLAN.md
 rm AGENTS.md
 rm .ralph_stuck_tracker
+rm .ralph_window_start
 rm ralph.log
+rm ralph.accumulated.log
 rm REPORT.md
+rm REPORT.accumulated.md
 
 # Reinitialize
 # Edit PROMPT_*.md if needed
-./loop.sh plan
+./orchestrator.sh plan
 ```
 
 ## Step 4: Prevent Recurrence

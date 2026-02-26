@@ -14,9 +14,9 @@ Ask the user using AskUserQuestion:
 "What would you like to customize?"
 
 Options:
-1. **Prompts** - Modify PROMPT_plan.md or PROMPT_build.md
+1. **Prompts** - Modify PROMPT_plan.md, PROMPT_build.md, or PROMPT_decompose.md
 2. **Validation** - Change test/lint/build commands
-3. **Loop behavior** - Model, limits, stuck detection, backup
+3. **Loop behavior** - Model routing, limits, stuck detection, backup
 4. **AGENTS.md** - Add project-specific learnings
 
 ## Step 2: Handle Based on Selection
@@ -26,7 +26,8 @@ Options:
 Ask: "Which prompt do you want to modify?"
 - **Planning prompt** - PROMPT_plan.md
 - **Building prompt** - PROMPT_build.md
-- **Both** - I'll guide you through each
+- **Decompose prompt** - PROMPT_decompose.md
+- **Both planning and building** - I'll guide you through each
 
 For each selected prompt:
 
@@ -36,6 +37,7 @@ For each selected prompt:
    - Ralph does too much per iteration → Add clearer exit criteria
    - Ralph uses wrong patterns → Add pattern guidance
    - Subagent counts need adjustment → Update parallelism numbers
+   - Decomposition is too aggressive / not aggressive enough → Adjust PROMPT_decompose.md thresholds
    - Other (describe)
 
 3. Apply the principle: **Start minimal, evolve through observation**
@@ -86,7 +88,7 @@ For each selected prompt:
 ### If "Loop behavior":
 
 Ask: "What loop setting do you want to change?"
-- **Model** - Switch between opus/sonnet/haiku
+- **Model routing** - Configure auto-selection or force a model
 - **Iteration limit** - Set max iterations
 - **Stuck detection** - Change failure threshold
 - **Remote backup** - Enable/disable GitHub push
@@ -94,25 +96,37 @@ Ask: "What loop setting do you want to change?"
 
 For each:
 
-**Model:**
-```bash
-# In loop.sh or via command line
-./loop.sh --model sonnet  # Faster, cheaper
-./loop.sh --model opus    # More capable (default)
+**Model routing:**
 
-# Or set default in environment
+By default the orchestrator auto-selects haiku/sonnet/opus per task. Options to override:
+
+```bash
+# Force a single model for all tasks (disables routing)
+./orchestrator.sh --model sonnet
+./orchestrator.sh --model opus
+
+# Disable routing, use RALPH_MODEL env var
+./orchestrator.sh --no-routing
 export RALPH_MODEL=sonnet
+
+# Annotate individual tasks in IMPLEMENTATION_PLAN.md
+# (routing reads these and skips classification)
+- [ ] [opus] Design the authentication architecture
+- [ ] [sonnet] Implement the login endpoint
+- [ ] [haiku] Add JSDoc to exported functions
 ```
 
 Guidance:
-- opus: Best for complex reasoning, architecture decisions
-- sonnet: Good for straightforward implementation tasks
-- haiku: Fast for simple tasks (not recommended for Ralph)
+- **Default (routing on):** Cheapest capable model is selected per task. Best for mixed-complexity plans.
+- **`--model sonnet`:** Good when all tasks are straightforward implementation work.
+- **`--model opus`:** Use when all tasks are complex or routing is mis-classifying too often.
+- **`--no-routing`:** Use when you want to manage models via environment variable across sessions.
+- **Tier annotations in plan:** Most precise — lets you control model per task without disabling routing globally.
 
 **Iteration limit:**
 ```bash
-./loop.sh 20        # Build mode, max 20 tasks
-./loop.sh plan 5    # Plan mode, max 5 iterations
+./orchestrator.sh 20        # Build mode, max 20 tasks
+./orchestrator.sh plan 5    # Plan mode, max 5 iterations
 ```
 
 Default is unlimited (runs until complete or Ctrl+C).
@@ -122,7 +136,7 @@ Default is unlimited (runs until complete or Ctrl+C).
 export RALPH_MAX_STUCK=5  # Fail 5 times before skipping (default: 3)
 ```
 
-Note: Stuck detection auto-skips tasks. If you prefer manual intervention, set high value or watch the loop.
+Note: The orchestrator automatically escalates the model tier after 2 failures on the same task (haiku→sonnet→opus). After `RALPH_MAX_STUCK` failures the task is marked `[S]` and skipped. If tasks are legitimately hard, increase the threshold or use `[opus]` annotations to start at a higher tier.
 
 **Remote backup:**
 ```bash
@@ -132,7 +146,7 @@ export RALPH_BACKUP=true   # Enable (default)
 
 **Verbosity:**
 ```bash
-./loop.sh --verbose  # More detailed Claude output
+./orchestrator.sh --verbose  # More detailed Claude output
 ```
 
 ### If "AGENTS.md":
@@ -169,7 +183,7 @@ After making changes:
 2. Suggest testing:
    ```
    To test this change:
-   1. Run: ./loop.sh [plan|build] 1  # Single iteration
+   1. Run: ./orchestrator.sh 1  # Single iteration
    2. Watch the behavior
    3. If good, continue; if not, revert with:
       git checkout [file]

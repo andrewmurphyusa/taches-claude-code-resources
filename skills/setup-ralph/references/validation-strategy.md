@@ -1,6 +1,6 @@
 # Validation Strategy
 
-Using tests, lints, and builds as backpressure to steer Ralph.
+Using tests, lints, builds, and infrastructure error recovery to steer Ralph.
 
 <what_is_backpressure>
 ## What is Backpressure?
@@ -16,6 +16,10 @@ Backpressure is automated validation that rejects invalid work. It creates a sel
 **Without backpressure:** Ralph generates code that may not work, accumulates errors, goes off track.
 
 **With backpressure:** Ralph must produce working code to progress. Quality is enforced, not hoped for.
+
+There are two levels of backpressure:
+- **Code-level:** Tests, type checks, lints, builds — enforced inside the Claude prompt
+- **Infrastructure-level:** API error recovery — enforced by the orchestrator outside the prompt
 </what_is_backpressure>
 
 <types_of_backpressure>
@@ -113,6 +117,60 @@ Ralph should create them as part of implementation. Update building prompt:
 - Non-functional requirements
 </types_of_backpressure>
 
+<infrastructure_error_recovery>
+## Infrastructure Error Recovery
+
+The orchestrator (`orchestrator.sh`) provides a second backpressure layer at the API level. When `loop.sh` exits with a non-zero code, the orchestrator classifies the error and applies the appropriate recovery strategy — without requiring manual intervention.
+
+### Error Types and Recovery
+
+**RATE_LIMIT** (HTTP 429 or `rate_limit_error`)
+- Exponential backoff: 1s → 2s → 4s → 8s → 16s → 32s → 60s (cap)
+- Each delay has ±20% jitter to avoid thundering herd
+- After 5 consecutive rate-limit failures: escalates to usage window sleep
+- The same task is retried after recovery
+
+**OVERLOADED** (`overloaded_error`)
+- Fixed 45s sleep, up to 3 retries
+- After 3 overloaded failures: escalates to rate limit treatment
+- The same task is retried after recovery
+
+**USAGE_EXHAUSTED** ("usage limit" or "5-hour window")
+- Computes remaining time from when the first successful iteration was recorded
+- Sleeps exactly until the 5-hour window resets (plus 5-minute buffer)
+- The same task is retried after the window resets
+- State file: `.ralph_window_start` (cleaned up on reset)
+
+**CONTEXT_TOO_LONG** (`context_length_exceeded`)
+- Task is automatically skipped (marked `[S]` in the plan)
+- Adds the task to the `## Blocked` section in `IMPLEMENTATION_PLAN.md`
+- Loop continues with the next task
+
+**AUTH_FAILURE** (`authentication_error`)
+- Loop stops immediately
+- Requires manual intervention (re-authenticate, check token)
+
+**UNKNOWN** (any other non-zero exit)
+- Exit code is propagated — loop stops
+- Investigate `ralph.log` for details
+
+### Pre-flight Token Estimation
+
+Before each iteration, the orchestrator estimates the prompt token count (`wc -w × 1.4`). If the estimate exceeds 150,000 tokens, a warning is logged. The iteration still runs — this is informational only.
+
+### Stuck Detection and Tier Escalation
+
+The orchestrator tracks per-task failure counts independently of error type:
+
+1. **First failure:** Task is retried (with any error recovery applied)
+2. **Second failure (STUCK_COUNT ≥ 2):** Model tier is automatically upgraded one step (haiku→sonnet, sonnet→opus) for the next attempt
+3. **Third failure (STUCK_COUNT ≥ MAX_STUCK):** Task is skipped — marked `[S]`, added to `## Blocked`
+
+`RALPH_MAX_STUCK` environment variable controls the threshold (default: 3).
+
+This escalation happens silently during the loop. If you observe a task consuming opus when it started as haiku, the orchestrator escalated it due to repeated failures.
+</infrastructure_error_recovery>
+
 <validation_levels>
 ## Validation Levels
 
@@ -188,6 +246,10 @@ Run:
 
 No validation needed. Planning mode doesn't change code.
 
+### Decompose Mode
+
+No validation needed. Decompose mode only modifies `IMPLEMENTATION_PLAN.md`.
+
 ### Building Mode
 
 Include validation as a required step:
@@ -245,20 +307,20 @@ Ralph should:
 
 ### Stuck in Loop
 
-If Ralph repeatedly fails validation (3+ iterations on same task):
+If Ralph repeatedly fails validation (3+ iterations on same task), the orchestrator's stuck detection will automatically:
+1. Mark the task `[S]` in `IMPLEMENTATION_PLAN.md`
+2. Add it to the `## Blocked` section
+3. Move on to the next task
 
-**Option 1: Note blocker and skip**
-```markdown
-If repeatedly failing (3+ attempts), note blocker in plan and move to next task
-```
+You can also intervene manually:
 
-**Option 2: Regenerate plan**
+**Option 1: Regenerate plan**
 ```bash
 rm IMPLEMENTATION_PLAN.md
-./loop.sh plan
+./orchestrator.sh plan
 ```
 
-**Option 3: Manual intervention**
+**Option 2: Manual intervention**
 ```bash
 # Stop loop
 Ctrl+C
@@ -267,11 +329,17 @@ Ctrl+C
 # Commit fix
 
 # Restart loop
-./loop.sh
+./orchestrator.sh
 ```
 
-**Option 4: Update AGENTS.md**
+**Option 3: Update AGENTS.md**
 Add guidance about the failure pattern so Ralph doesn't repeat it.
+
+**Option 4: Force a stronger model for the stuck task**
+Edit `IMPLEMENTATION_PLAN.md` to add `[opus]` before the task description, then restart.
+```
+- [ ] [opus] Fix the authentication bug
+```
 </handling_validation_failures>
 
 <backpressure_as_learning>
@@ -389,4 +457,9 @@ Start strict, loosen if too slow:
 - Add checks when new failure patterns emerge
 - Remove checks when no longer catching issues
 - Balance speed vs quality based on project phase
+
+**Tuning infrastructure recovery:**
+- `RALPH_MAX_STUCK=5` — increase if tasks are legitimately hard and need more attempts
+- `./orchestrator.sh --model opus` — use when all tasks are complex and routing overhead isn't worth it
+- `./orchestrator.sh --no-routing` — disable routing and rely on `RALPH_MODEL` env var
 </tuning_backpressure>

@@ -1,13 +1,21 @@
 {
-  "name": "taches-cc-resources",
-  "description": "Curated Claude Code skills and commands for prompt engineering, MCP servers, subagents, hooks, and productivity workflows",
-  "version": "1.0.0",
+  "name": "voodoobunny-fork-of-taches-cc-resources",
+  "description": "Curated Claude Code skills and commands for prompt engineering, MCP servers, subagents, hooks, and productivity workflows. Based on taches-cc-resources by Lex Christopherson — extended with an improved Ralph Wiggum autonomous coding loop (orchestrator, model routing, error recovery, task decomposition).",
+  "version": "1.1.0",
   "author": {
-    "name": "Lex Christopherson",
-    "email": "lex@glittercowboy.com"
+    "name": "andrewmurphyusa",
+    "email": "voodoobunny@hotmail.com"
   },
-  "homepage": "https://github.com/glittercowboy/taches-cc-resources",
-  "repository": "https://github.com/glittercowboy/taches-cc-resources",
+  "contributors": [
+    {
+      "name": "Lex Christopherson",
+      "email": "lex@glittercowboy.com",
+      "url": "https://github.com/glittercowboy/taches-cc-resources"
+    }
+  ],
+  "forkedFrom": "https://github.com/glittercowboy/taches-cc-resources",
+  "homepage": "https://github.com/andrewmurphyusa/taches-claude-code-resources",
+  "repository": "https://github.com/andrewmurphyusa/taches-claude-code-resources",
   "license": "MIT",
   "keywords": [
     "skills",
@@ -17,6 +25,8 @@
     "hooks",
     "slash-commands",
     "prompt-engineering",
-    "meta-prompting"
+    "meta-prompting",
+    "ralph",
+    "autonomous-coding"
   ]
 }

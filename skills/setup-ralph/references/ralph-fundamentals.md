@@ -14,10 +14,12 @@ while :; do cat PROMPT.md | claude ; done
 The loop continuously feeds a prompt file to Claude Code CLI. The agent completes one task, updates the implementation plan on disk, commits changes, then exits. The loop restarts immediately with fresh context.
 
 **The core insight:** Ralph solves context accumulation by starting each iteration with fresh context. This is "deterministically bad in an undeterministic world"—embracing the chaos rather than fighting it.
+
+**The improved version** adds an orchestrator layer on top of the bare loop. `orchestrator.sh` wraps `loop.sh` with per-task model routing, infrastructure error recovery, and task decomposition — without changing Ralph's core philosophy.
 </what_is_ralph>
 
-<three_phases_two_prompts_one_loop>
-## Three Phases, Two Prompts, One Loop
+<four_phases_three_prompts_one_loop>
+## Four Phases, Three Prompts, One Loop
 
 Ralph isn't just "a loop that codes." It's a funnel with specific structure:
 
@@ -37,7 +39,34 @@ The planning prompt instructs Claude to:
 
 **Critical instruction:** "Don't assume not implemented; confirm with code search first."
 
-### Phase 2: Building Mode
+```bash
+./orchestrator.sh plan
+```
+
+### Phase 2: Decompose Mode (Optional but Recommended)
+
+**Objective:** Split complex tasks before execution
+**Input:** `IMPLEMENTATION_PLAN.md`
+**Output:** Updated plan with tier-annotated subtasks
+**Rule:** Only modifies `IMPLEMENTATION_PLAN.md`, never touches code
+
+The decompose prompt instructs Claude to:
+1. Read each incomplete task
+2. Identify candidates (opus-tier + >300 chars, "and" between actions, 5+ files)
+3. Break candidates into subtasks annotated with `[opus]`/`[sonnet]`/`[haiku]`
+4. Mark parent tasks `[S]` (container — skipped during execution)
+5. Exit
+
+**Why decompose?**
+- Prevents opus from being used on trivially simple sub-steps
+- Makes tasks completable in a single iteration
+- Enables the orchestrator to route cheaply (haiku for comments, opus for architecture)
+
+```bash
+./orchestrator.sh decompose
+```
+
+### Phase 3: Building Mode
 
 **Objective:** Implement from the plan
 **Input:** Plan, specs, existing code
@@ -54,7 +83,13 @@ The building prompt instructs Claude to:
 7. Commit with descriptive message
 8. Exit
 
-### Phase 3: Observation (Your Role)
+The orchestrator layer handles model selection before each iteration, and error recovery after.
+
+```bash
+./orchestrator.sh
+```
+
+### Phase 4: Observation (Your Role)
 
 **Objective:** Sit on the loop, not in it
 **Action:** Engineer the environment that allows Ralph to succeed
@@ -72,7 +107,56 @@ You DON'T:
 - Manually implement features
 - Edit code directly
 - Interfere with the autonomous process
-</three_phases_two_prompts_one_loop>
+</four_phases_three_prompts_one_loop>
+
+<orchestrator_layer>
+## The Orchestrator Layer
+
+`orchestrator.sh` sits between you and `loop.sh`. It adds three capabilities without changing Ralph's core philosophy.
+
+### 1. Dynamic Model Routing
+
+Before each iteration, the orchestrator reads the next task from `IMPLEMENTATION_PLAN.md` and classifies its complexity:
+
+| Tier | Model | When used |
+|------|-------|-----------|
+| Simple | haiku | Rename, reformat, add comments, update config |
+| Medium | sonnet | Implement features, fix bugs, write tests (default) |
+| Complex | opus | Architect, debug, investigate, refactor across files |
+
+Tasks can also carry explicit annotations: `[opus] Design the auth flow` overrides automatic classification.
+
+**Tier escalation:** If the same task fails twice, the orchestrator automatically upgrades the model tier for the next attempt (haiku→sonnet, sonnet→opus).
+
+### 2. Infrastructure Error Recovery
+
+The orchestrator captures `loop.sh` output and classifies errors:
+
+| Error type | Recovery |
+|------------|---------|
+| `RATE_LIMIT` | Exponential backoff 1s → 60s with ±20% jitter; escalates to window sleep after 5 retries |
+| `OVERLOADED` | Fixed 45s sleep, 3 retries; escalates to rate limit treatment |
+| `USAGE_EXHAUSTED` | Sleeps until the 5-hour usage window resets (computed from first success) |
+| `CONTEXT_TOO_LONG` | Task automatically skipped (marked `[S]`) |
+| `AUTH_FAILURE` | Stops immediately — requires manual intervention |
+
+This means the loop can run unattended overnight without dying on transient API errors.
+
+### 3. Task Decomposition
+
+The `decompose` mode runs a one-shot Opus analysis that:
+- Identifies tasks too large to complete in a single iteration
+- Splits them into subtasks annotated with complexity tiers
+- Marks the parent task `[S]` so it's skipped by the build loop
+
+Decompose once, before building, to maximize routing efficiency.
+
+### Relationship to loop.sh
+
+`orchestrator.sh` calls `loop.sh` for exactly one iteration per orchestrator loop. The `RALPH_ORCHESTRATED=true` env var signals `loop.sh` to skip stuck-file cleanup (the orchestrator owns that lifecycle).
+
+You can still run `loop.sh` directly for simple cases or debugging — nothing about the underlying loop has changed.
+</orchestrator_layer>
 
 <core_principles>
 ## Core Principles
@@ -85,9 +169,17 @@ Each loop starts with a clean 200K context window. No accumulated conversation h
 
 The `IMPLEMENTATION_PLAN.md` file is the only state that persists across iterations. This serves as deterministic shared state—no sophisticated orchestration needed. Claude reads it, updates it, commits it.
 
+The orchestrator adds two small state files:
+- `.ralph_stuck_tracker` — tracks failures per task (cleaned up on exit)
+- `.ralph_window_start` — tracks 5-hour usage window start (cleaned up on reset)
+
+These are transient housekeeping files, not application state.
+
 ### 3. Backpressure as Steering
 
 Tests, type checks, lints, and builds provide downstream steering. If Ralph's code doesn't pass validation, the loop continues until it does. This creates self-correcting behavior without manual intervention.
+
+The orchestrator adds a second layer of backpressure at the infrastructure level: rate limits, usage exhaustion, and overload errors are recovered automatically rather than crashing the loop.
 
 **Validation must be:**
 - Automated (no human approval)
@@ -189,7 +281,8 @@ Discard `IMPLEMENTATION_PLAN.md` and restart planning when:
 To regenerate:
 ```bash
 rm IMPLEMENTATION_PLAN.md
-./loop.sh plan
+./orchestrator.sh plan
+./orchestrator.sh decompose  # Optional: re-decompose if tasks are complex
 ```
 </when_to_regenerate_plan>
 
@@ -209,18 +302,37 @@ git reset --hard
 **Regenerate plan:**
 ```bash
 rm IMPLEMENTATION_PLAN.md
-./loop.sh plan
+./orchestrator.sh plan
+```
+
+**Decompose complex tasks:**
+```bash
+./orchestrator.sh decompose
 ```
 
 **Limit iterations:**
 ```bash
-./loop.sh 20        # Build mode, max 20 tasks
-./loop.sh plan 5    # Plan mode, max 5 iterations
+./orchestrator.sh 20          # Build mode, max 20 tasks
+./orchestrator.sh plan 5      # Plan mode, max 5 iterations
+```
+
+**Force a specific model:**
+```bash
+./orchestrator.sh --model opus    # Override routing for all tasks
+./orchestrator.sh --no-routing    # Use RALPH_MODEL env var instead
 ```
 
 **Review what Ralph did:**
 ```bash
 git log --oneline
 git show [commit-hash]
+```
+
+**Check session logs:**
+```bash
+tail -f ralph.log              # Live log of current session
+cat ralph.accumulated.log      # Historical logs across sessions
+cat REPORT.md                  # Last session summary
+cat REPORT.accumulated.md      # All session summaries
 ```
 </escape_hatches>

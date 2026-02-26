@@ -1,6 +1,6 @@
 ---
 name: setup-ralph
-description: Set up and configure Geoffrey Huntley's original Ralph Wiggum autonomous coding loop in any directory with proper structure, prompts, and backpressure.
+description: Set up and configure the improved Ralph Wiggum autonomous coding loop in any directory — with orchestrator-based model routing, infrastructure error recovery, task decomposition, and backpressure.
 ---
 
 <essential_principles>
@@ -18,23 +18,28 @@ The loop feeds a prompt file to Claude, the agent completes one task, updates th
 
 **The Ralph Wiggum Technique is deterministically bad in an undeterministic world.** Ralph solves context accumulation by starting each iteration with fresh context—the core insight behind Geoffrey's approach.
 
-### Three Phases, Two Prompts, One Loop
+### Four Phases, Three Prompts, One Loop
 
-1. **Planning Phase**: Gap analysis (specs vs code) outputs prioritized TODO list—no implementation, no commits
-2. **Building Phase**: Picks tasks from plan, implements, runs tests (backpressure), commits
-3. **Observation Phase**: You sit on the loop, not in it—engineer the setup and environment that allows Ralph to succeed
+1. **Planning Phase**: Gap analysis (specs vs code) outputs prioritized TODO list—no implementation, no commits (`./orchestrator.sh plan`)
+2. **Decompose Phase** *(optional)*: Splits complex tasks into tier-annotated subtasks `[opus]`/`[sonnet]`/`[haiku]` before execution (`./orchestrator.sh decompose`)
+3. **Building Phase**: Picks tasks from plan, selects model per task complexity, implements, runs tests (backpressure), commits (`./orchestrator.sh`)
+4. **Observation Phase**: You sit on the loop, not in it—engineer the setup and environment that allows Ralph to succeed
 
 ### Key Principles
 
 **Your Role**: Ralph does all the work, including deciding which planned work to implement next and how to implement it. Your job is to engineer the environment.
 
-**Backpressure**: Create backpressure via tests, typechecks, lints, builds that reject invalid/unacceptable work.
+**Backpressure**: Create backpressure via tests, typechecks, lints, builds that reject invalid/unacceptable work. The orchestrator adds a second backpressure layer at the infrastructure level: rate limits, overload, and usage exhaustion are recovered automatically.
 
 **Observation**: Watch, especially early on. Prompts evolve through observed failure patterns.
 
 **Context Efficiency**: With ~176K usable tokens from 200K window, allocating 40-60% to "smart zone" means tight tasks with one task per loop achieves maximum context utilization.
 
 **File I/O as State**: The plan file persists between isolated loop executions, serving as deterministic shared state—no sophisticated orchestration needed.
+
+**Dynamic Model Routing**: The orchestrator classifies each task and selects the cheapest capable model. Simple tasks (rename, reformat) use haiku; standard work uses sonnet; complex tasks (architect, debug, investigate) use opus. Annotate tasks explicitly with `[opus]`/`[sonnet]`/`[haiku]` to override.
+
+**Stuck Escalation**: When the same task fails twice, the orchestrator automatically upgrades the model tier one step (haiku→sonnet→opus) before retrying. After max failures the task is skipped.
 
 **Remote Backup**: The loop automatically creates a private GitHub repo and pushes after each commit. This protects against accidental data loss from autonomous operations. Requires `gh` CLI authenticated. Disable with `RALPH_BACKUP=false`.
 
@@ -69,10 +74,10 @@ After reading the workflow, follow it exactly.
 
 All in `references/`:
 
-**Core Concepts:** ralph-fundamentals.md - Three phases, two prompts, one loop
-**Structure:** project-structure.md - Required files and directory layout
-**Prompts:** prompt-design.md - Planning vs building mode instructions
-**Backpressure:** validation-strategy.md - Tests, lints, builds as steering
+**Core Concepts:** ralph-fundamentals.md - Four phases, orchestrator layer, model routing, error recovery
+**Structure:** project-structure.md - Required files including orchestrator.sh, scripts/, auth/
+**Prompts:** prompt-design.md - Planning, building, and decompose mode instructions
+**Backpressure:** validation-strategy.md - Tests, lints, builds, and infrastructure error recovery
 **Best Practices:** operational-learnings.md - AGENTS.md guidance and evolution
 </reference_index>
 
@@ -90,5 +95,5 @@ Skill is successful when:
 - User understands which workflow they need
 - Appropriate workflow loaded based on intent
 - All required references loaded by workflow
-- User can set up and run Ralph loops independently
+- User can set up and run Ralph loops independently using orchestrator.sh
 </success_criteria>
