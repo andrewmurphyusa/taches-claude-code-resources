@@ -26,6 +26,7 @@ sed_i() {
 # Configuration
 MODEL="${RALPH_MODEL:-opus}"
 VERBOSE="${RALPH_VERBOSE:-false}"
+STATUS_FILE="RALPH_STATUS.txt"
 
 # Validate model against whitelist (security: prevents command injection)
 validate_model() {
@@ -368,6 +369,9 @@ EOF
     "interrupted")
       echo "Manually interrupted (Ctrl+C)." >> "$REPORT_FILE"
       ;;
+    "status_file")
+      echo "Stopped via RALPH_STATUS.txt signal." >> "$REPORT_FILE"
+      ;;
     "error")
       echo "Exited due to error (code $2)." >> "$REPORT_FILE"
       ;;
@@ -507,6 +511,15 @@ echo "" >> "$LOG_FILE"
 ITERATION=0
 while true; do
   ITERATION=$((ITERATION + 1))
+
+  # Check for stop signal
+  if [ -f "$STATUS_FILE" ] && grep -qiE 'BREAK|INTERRUPT|STOP' "$STATUS_FILE" 2>/dev/null; then
+    echo ""
+    echo "Stop signal detected in $STATUS_FILE: $(cat "$STATUS_FILE")"
+    echo "=== Ralph stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+    cleanup "status_file"
+    exit 0
+  fi
 
   ITERATION_START=$(date +%s)
   echo "📍 Iteration $ITERATION - $(date '+%Y-%m-%d %H:%M:%S')"

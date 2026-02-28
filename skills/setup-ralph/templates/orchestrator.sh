@@ -76,6 +76,8 @@ fi
 # ============================================================================
 
 PLAN_FILE="IMPLEMENTATION_PLAN.md"
+STATUS_FILE="RALPH_STATUS.txt"
+LOG_FILE="ralph.log"
 ROUTING_ENABLED=true        # Set to false to pass through to loop.sh without routing
 FORCED_MODEL=""             # If set, overrides routing for all tasks
 
@@ -210,6 +212,9 @@ check_all_tasks_complete() {
 # MAIN ORCHESTRATION LOOP
 # ============================================================================
 
+# Set status file to RUNNING at startup
+echo "RUNNING" > "$STATUS_FILE"
+
 echo "============================================"
 echo "  Improved Ralph Orchestrator"
 echo "============================================"
@@ -290,6 +295,14 @@ init_stuck_tracker
 ITERATION=0
 while true; do
   ITERATION=$((ITERATION + 1))
+
+  # Check for stop signal
+  if [ -f "$STATUS_FILE" ] && grep -qiE 'BREAK|INTERRUPT|STOP' "$STATUS_FILE" 2>/dev/null; then
+    echo ""
+    echo "Stop signal detected in $STATUS_FILE: $(cat "$STATUS_FILE")"
+    echo "=== Orchestrator stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+    exit 0
+  fi
 
   # Check iteration limit
   if [ -n "$LIMIT" ] && [ "$ITERATION" -gt "$LIMIT" ]; then

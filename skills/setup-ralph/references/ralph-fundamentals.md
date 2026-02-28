@@ -169,9 +169,10 @@ Each loop starts with a clean 200K context window. No accumulated conversation h
 
 The `IMPLEMENTATION_PLAN.md` file is the only state that persists across iterations. This serves as deterministic shared state—no sophisticated orchestration needed. Claude reads it, updates it, commits it.
 
-The orchestrator adds two small state files:
+The orchestrator adds three small state files:
 - `.ralph_stuck_tracker` — tracks failures per task (cleaned up on exit)
 - `.ralph_window_start` — tracks 5-hour usage window start (cleaned up on reset)
+- `RALPH_STATUS.txt` — set to `RUNNING` on startup; write `STOP` here for a graceful stop between iterations
 
 These are transient housekeeping files, not application state.
 
@@ -289,9 +290,16 @@ rm IMPLEMENTATION_PLAN.md
 <escape_hatches>
 ## Escape Hatches
 
-**Stop the loop:**
+**Stop the loop gracefully** (finishes current Claude invocation, then exits with a session report):
 ```bash
-Ctrl+C  # Stops current iteration
+echo "STOP" > RALPH_STATUS.txt
+```
+
+Ralph checks `RALPH_STATUS.txt` at the start of each iteration. Any content matching `STOP`, `BREAK`, or `INTERRUPT` (case-insensitive) triggers a clean exit. `ralph.log` gets a timestamped stop entry and `REPORT.md` records `"Stopped via RALPH_STATUS.txt signal."` as the exit reason. `orchestrator.sh` sets this file to `RUNNING` every time it starts, so there's no stale signal between runs and you can tell at a glance whether Ralph is active.
+
+**Stop immediately** (kills the current Claude invocation mid-run):
+```bash
+Ctrl+C
 ```
 
 **Revert uncommitted changes:**
