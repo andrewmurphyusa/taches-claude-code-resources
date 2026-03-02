@@ -1,2 +1,32 @@
 # Claude settings
 .claude/settings*
+.claude
+
+# Prompts
+.prompts/**
+.prompts
+
+# Ralph implementation (using ralph within itself)
+/loop.sh
+/loop-docker.sh
+/ralph.sh
+/orchestrator.sh
+/ralph-docker.sh
+/IMPLEMENTATION_PLAN.md
+/PROMPT_*.md
+/AGENTS.md
+/scripts/**
+/scripts
+/auth/**
+/auth
+/specs/**
+/specs
+
+# Ralph runtime files
+RALPH_STATUS.txt
+ralph.log
+ralph.accumulated.log
+REPORT.md
+REPORT.accumulated.md
+.ralph_stuck_tracker
+.ralph_window_start
