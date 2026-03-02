@@ -14,7 +14,7 @@ Analyze IMPLEMENTATION_PLAN.md and decompose complex tasks into tier-annotated s
 
 0a. Study specs/* to understand project requirements
 0b. Study @IMPLEMENTATION_PLAN.md to understand current task list
-0c. Reference: orchestrator.sh, scripts/*, loop.sh to understand current capabilities
+0c. Reference: orchestrator.sh, scripts/*, ralph.sh to understand current capabilities
 0d. Study @AGENTS.md (if exists) for operational context
 
 1. Identify Decomposition Candidates

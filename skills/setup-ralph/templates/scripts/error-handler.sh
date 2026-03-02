@@ -1,6 +1,6 @@
 #!/bin/bash
 # Error Classification and Recovery for Ralph Orchestrator
-# Classifies loop.sh output into error types and handles recovery.
+# Classifies ralph.sh output into error types and handles recovery.
 # Source this from orchestrator.sh alongside classify-task.sh.
 #
 # Spec 03 defines 5 error types:

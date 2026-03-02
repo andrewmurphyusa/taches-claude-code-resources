@@ -120,7 +120,7 @@ Ralph should create them as part of implementation. Update building prompt:
 <infrastructure_error_recovery>
 ## Infrastructure Error Recovery
 
-The orchestrator (`orchestrator.sh`) provides a second backpressure layer at the API level. When `loop.sh` exits with a non-zero code, the orchestrator classifies the error and applies the appropriate recovery strategy — without requiring manual intervention.
+The orchestrator (`orchestrator.sh`) provides a second backpressure layer at the API level. When `ralph.sh` exits with a non-zero code, the orchestrator classifies the error and applies the appropriate recovery strategy — without requiring manual intervention.
 
 ### Error Types and Recovery
 

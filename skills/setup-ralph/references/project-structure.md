@@ -6,14 +6,14 @@ Required files and directory layout for a Ralph loop.
 ## Essential Files
 
 ### orchestrator.sh
-Primary entry point. Wraps `loop.sh` with per-task model routing, error recovery, and task decomposition.
+Primary entry point. Wraps `ralph.sh` with per-task model routing, error recovery, and task decomposition.
 
 **Responsibilities:**
 - Reads the next incomplete task from `IMPLEMENTATION_PLAN.md`
 - Classifies task complexity → selects haiku, sonnet, or opus
 - Escalates model tier after repeated failures on the same task
 - Classifies and recovers from infrastructure errors (rate limits, usage exhaustion, overload)
-- Delegates each iteration to `loop.sh` with the selected model
+- Delegates each iteration to `ralph.sh` with the selected model
 
 **Usage:**
 ```bash
@@ -26,7 +26,7 @@ Primary entry point. Wraps `loop.sh` with per-task model routing, error recovery
 
 Located at project root.
 
-### loop.sh
+### ralph.sh
 Underlying loop engine. Runs one prompt against Claude and exits. Called by `orchestrator.sh` with a pre-selected model.
 
 Can also be run directly (without the orchestrator) for simple use cases or debugging.
@@ -47,7 +47,7 @@ while :; do cat PROMPT.md | claude ; done
 Located at project root.
 
 ### scripts/
-Helper scripts sourced by `orchestrator.sh` and `loop.sh`.
+Helper scripts sourced by `orchestrator.sh` and `ralph.sh`.
 
 - **`scripts/classify-task.sh`** — Classifies task text into haiku/sonnet/opus using keyword heuristics. Also exports `strip_tier_annotation()` and `should_decompose()`.
 - **`scripts/model-config.sh`** — Model tier constants (`MODEL_HAIKU`, `MODEL_SONNET`, `MODEL_OPUS`) and `validate_model()` / `upgrade_tier()`.
@@ -145,7 +145,7 @@ Located at `auth/` subdirectory.
 ```
 project-root/
 ├── orchestrator.sh            # Primary entry point (executable)
-├── loop.sh                    # Underlying loop engine (executable)
+├── ralph.sh                   # Underlying loop engine (executable)
 ├── scripts/                   # Orchestrator helpers (executable)
 │   ├── classify-task.sh       # Task complexity classifier
 │   ├── model-config.sh        # Model tier constants
@@ -268,7 +268,7 @@ Optimize by:
 - Using parallel subagents for reading
 - One task per iteration (focused context)
 
-**Note:** `orchestrator.sh` and `scripts/` run outside the Claude context window. They read `IMPLEMENTATION_PLAN.md` to determine the task and model, then invoke `loop.sh` for exactly one iteration. This orchestration overhead has zero impact on Ralph's context budget.
+**Note:** `orchestrator.sh` and `scripts/` run outside the Claude context window. They read `IMPLEMENTATION_PLAN.md` to determine the task and model, then invoke `ralph.sh` for exactly one iteration. This orchestration overhead has zero impact on Ralph's context budget.
 </file_loading_order>
 
 <topic_of_concern_scope>
@@ -304,7 +304,7 @@ Absolute minimum to start a Ralph loop:
 ```
 project-root/
 ├── orchestrator.sh            # Primary entry point
-├── loop.sh                    # Loop engine
+├── ralph.sh                   # Loop engine
 ├── scripts/                   # Orchestrator helpers
 │   ├── classify-task.sh
 │   ├── model-config.sh

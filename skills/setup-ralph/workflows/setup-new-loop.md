@@ -18,7 +18,7 @@ Wait for response. If no path provided, use current working directory from envir
 ## Step 2: Verify Directory Safety
 
 Check if directory already has Ralph setup:
-- Look for `orchestrator.sh`, `loop.sh`, `PROMPT_plan.md`, `PROMPT_build.md`, or `IMPLEMENTATION_PLAN.md`
+- Look for `orchestrator.sh`, `ralph.sh`, `PROMPT_plan.md`, `PROMPT_build.md`, or `IMPLEMENTATION_PLAN.md`
 - If found, ask: "This directory appears to have Ralph files already. Overwrite? (yes/no)"
 - If no, exit workflow
 
@@ -85,7 +85,7 @@ mkdir -p specs src scripts auth
 
 **Essential files:**
 - `orchestrator.sh` - Primary entry point with model routing and error recovery (from templates/orchestrator.sh)
-- `loop.sh` - Underlying loop engine (from templates/loop.sh)
+- `ralph.sh` - Underlying loop engine (from templates/ralph.sh)
 - `scripts/classify-task.sh` - Task complexity classifier (from templates/scripts/classify-task.sh)
 - `scripts/model-config.sh` - Model tier constants (from templates/scripts/model-config.sh)
 - `scripts/error-handler.sh` - Error classification and recovery (from templates/scripts/error-handler.sh)
@@ -121,7 +121,7 @@ Copy all four scripts from `templates/scripts/` to the target `scripts/` directo
 - `scripts/error-handler.sh`
 - `scripts/stuck-tracker.sh`
 
-Copy `templates/loop.sh` to target directory as `loop.sh`.
+Copy `templates/ralph.sh` to target directory as `ralph.sh`.
 
 No customization needed — the scripts are self-contained and project-agnostic.
 
@@ -182,7 +182,7 @@ Start minimal. Add entries only when Ralph exhibits repeated failures or needs s
 ## Step 11: Make Scripts Executable
 
 ```bash
-chmod +x orchestrator.sh loop.sh scripts/*.sh
+chmod +x orchestrator.sh ralph.sh scripts/*.sh
 ```
 
 **Docker mode:** Also make loop-docker.sh executable:
@@ -281,7 +281,7 @@ DOCKER MODE (if enabled):
 
 FILES:
 - orchestrator.sh         - Primary entry point (use this)
-- loop.sh                 - Underlying loop engine
+- ralph.sh                - Underlying loop engine
 - scripts/                - Orchestrator helpers (classify-task, error-handler, etc.)
 - loop-docker.sh          - Docker-wrapped loop (if Docker mode)
 - Dockerfile              - Container definition (if Docker mode)
@@ -319,14 +319,14 @@ If option 3 selected, display example from references/spec-examples.md (create t
 This workflow is complete when:
 - [ ] Directory structure created with all required files and subdirectories (scripts/, auth/)
 - [ ] orchestrator.sh deployed as primary entry point
-- [ ] loop.sh deployed as underlying engine
+- [ ] ralph.sh deployed as underlying engine
 - [ ] All four scripts/ helper files deployed
 - [ ] PROMPT_plan.md generated with appropriate settings
 - [ ] PROMPT_build.md generated with validation commands
 - [ ] PROMPT_decompose.md deployed
 - [ ] Auth example files deployed to auth/
 - [ ] AGENTS.md initialized (empty or minimal)
-- [ ] orchestrator.sh, loop.sh, and scripts/*.sh made executable
+- [ ] orchestrator.sh, ralph.sh, and scripts/*.sh made executable
 - [ ] Usage instructions displayed to user (including orchestrator.sh commands, decompose mode, model routing, error recovery)
 - [ ] User knows next steps (create specs, run orchestrator)
 - [ ] User offered help with spec creation

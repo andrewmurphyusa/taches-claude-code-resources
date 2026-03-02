@@ -153,13 +153,13 @@ Then investigate WHY:
 
 **Check orchestrator and scripts exist:**
 ```bash
-ls -la orchestrator.sh loop.sh scripts/
+ls -la orchestrator.sh ralph.sh scripts/
 ```
 If missing, run setup again or restore from templates.
 
 **Check scripts are executable:**
 ```bash
-chmod +x orchestrator.sh loop.sh scripts/*.sh
+chmod +x orchestrator.sh ralph.sh scripts/*.sh
 ```
 
 **Check prompt files exist:**
@@ -211,7 +211,7 @@ If missing, run `./orchestrator.sh plan` first.
 
 **Too many API calls:**
 - Run fewer iterations: `./orchestrator.sh 10`
-- Increase sleep between iterations (edit loop.sh)
+- Increase sleep between iterations (edit ralph.sh)
 - Use batch backup (reduce push frequency)
 
 ### If "API errors":

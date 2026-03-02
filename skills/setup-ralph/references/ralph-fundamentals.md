@@ -15,7 +15,7 @@ The loop continuously feeds a prompt file to Claude Code CLI. The agent complete
 
 **The core insight:** Ralph solves context accumulation by starting each iteration with fresh context. This is "deterministically bad in an undeterministic world"—embracing the chaos rather than fighting it.
 
-**The improved version** adds an orchestrator layer on top of the bare loop. `orchestrator.sh` wraps `loop.sh` with per-task model routing, infrastructure error recovery, and task decomposition — without changing Ralph's core philosophy.
+**The improved version** adds an orchestrator layer on top of the bare loop. `orchestrator.sh` wraps `ralph.sh` with per-task model routing, infrastructure error recovery, and task decomposition — without changing Ralph's core philosophy.
 </what_is_ralph>
 
 <four_phases_three_prompts_one_loop>
@@ -112,7 +112,7 @@ You DON'T:
 <orchestrator_layer>
 ## The Orchestrator Layer
 
-`orchestrator.sh` sits between you and `loop.sh`. It adds three capabilities without changing Ralph's core philosophy.
+`orchestrator.sh` sits between you and `ralph.sh`. It adds three capabilities without changing Ralph's core philosophy.
 
 ### 1. Dynamic Model Routing
 
@@ -130,7 +130,7 @@ Tasks can also carry explicit annotations: `[opus] Design the auth flow` overrid
 
 ### 2. Infrastructure Error Recovery
 
-The orchestrator captures `loop.sh` output and classifies errors:
+The orchestrator captures `ralph.sh` output and classifies errors:
 
 | Error type | Recovery |
 |------------|---------|
@@ -151,11 +151,11 @@ The `decompose` mode runs a one-shot Opus analysis that:
 
 Decompose once, before building, to maximize routing efficiency.
 
-### Relationship to loop.sh
+### Relationship to ralph.sh
 
-`orchestrator.sh` calls `loop.sh` for exactly one iteration per orchestrator loop. The `RALPH_ORCHESTRATED=true` env var signals `loop.sh` to skip stuck-file cleanup (the orchestrator owns that lifecycle).
+`orchestrator.sh` calls `ralph.sh` for exactly one iteration per orchestrator loop. The `RALPH_ORCHESTRATED=true` env var signals `ralph.sh` to skip stuck-file cleanup (the orchestrator owns that lifecycle).
 
-You can still run `loop.sh` directly for simple cases or debugging — nothing about the underlying loop has changed.
+You can still run `ralph.sh` directly for simple cases or debugging — nothing about the underlying loop has changed.
 </orchestrator_layer>
 
 <core_principles>

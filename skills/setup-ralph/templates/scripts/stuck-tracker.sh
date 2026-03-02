@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stuck Tracker — shared stuck detection functions
-# Sourced by both orchestrator.sh and loop.sh
+# Sourced by both orchestrator.sh and ralph.sh
 #
 # Depends on: STUCK_FILE, MAX_STUCK, PLAN_FILE, sed_i() being set by caller
 

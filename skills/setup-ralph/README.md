@@ -49,7 +49,7 @@ Then follow the prompts to configure:
 ```
 your-project/
 ├── orchestrator.sh      # Primary entry point (model routing, error recovery)
-├── loop.sh              # Underlying loop engine
+├── ralph.sh             # Underlying loop engine
 ├── scripts/             # Orchestrator helper scripts
 │   ├── classify-task.sh
 │   ├── model-config.sh
@@ -70,7 +70,7 @@ your-project/
 
 ## Running the Loop
 
-**Direct mode (use `orchestrator.sh`, not `loop.sh` directly):**
+**Direct mode (use `orchestrator.sh`, not `ralph.sh` directly):**
 ```bash
 ./orchestrator.sh plan          # Generate implementation plan
 ./orchestrator.sh decompose     # (Optional) split complex tasks

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Improved Ralph Orchestrator
-# Wraps loop.sh with dynamic model selection based on task complexity
+# Wraps ralph.sh with dynamic model selection based on task complexity
 #
 # Usage:
 #   ./orchestrator.sh              # Build mode, auto-select model per task
@@ -62,12 +62,12 @@ load_cloud_credentials() {
 # Load cloud credentials before any Claude invocations
 load_cloud_credentials
 
-# Locate loop.sh: env var override, or local fork in project root
-LOOP_SH="${RALPH_LOOP_SH:-$ORCHESTRATOR_DIR/loop.sh}"
+# Locate ralph.sh: env var override, or local fork in project root
+LOOP_SH="${RALPH_LOOP_SH:-$ORCHESTRATOR_DIR/ralph.sh}"
 
 if [ ! -f "$LOOP_SH" ]; then
-  echo "Error: loop.sh not found at $LOOP_SH"
-  echo "Set RALPH_LOOP_SH to the path of your loop.sh, or place it next to orchestrator.sh"
+  echo "Error: ralph.sh not found at $LOOP_SH"
+  echo "Set RALPH_LOOP_SH to the path of your ralph.sh, or place it next to orchestrator.sh"
   exit 1
 fi
 
@@ -78,7 +78,7 @@ fi
 PLAN_FILE="IMPLEMENTATION_PLAN.md"
 STATUS_FILE="RALPH_STATUS.txt"
 LOG_FILE="ralph.log"
-ROUTING_ENABLED=true        # Set to false to pass through to loop.sh without routing
+ROUTING_ENABLED=true        # Set to false to pass through to ralph.sh without routing
 FORCED_MODEL=""             # If set, overrides routing for all tasks
 
 # ============================================================================
@@ -116,11 +116,11 @@ print_help() {
   echo ""
   echo "Environment Variables:"
   echo "  RALPH_MODEL          Default model if routing disabled (default: opus)"
-  echo "  RALPH_LOOP_SH        Path to loop.sh (default: ./loop.sh)"
+  echo "  RALPH_LOOP_SH        Path to ralph.sh (default: ./ralph.sh)"
   echo "  RALPH_MAX_STUCK      Max failures before skipping task (default: 3)"
   echo "  RALPH_VERBOSE        Enable verbose mode (true/false)"
   echo "  RALPH_BACKUP         Enable remote backup (true/false, default: true)"
-  echo "  RALPH_ORCHESTRATED   Set by orchestrator — loop.sh skips stuck file cleanup"
+  echo "  RALPH_ORCHESTRATED   Set by orchestrator — ralph.sh skips stuck file cleanup"
   echo ""
   echo "Examples:"
   echo "  $0                   # Build with auto model selection"
@@ -230,7 +230,7 @@ echo "Loop:    $LOOP_SH"
 echo "============================================"
 echo ""
 
-# Plan mode: always use opus, run loop.sh directly
+# Plan mode: always use opus, run ralph.sh directly
 if [ "$MODE" = "plan" ]; then
   PLAN_MODEL="${FORCED_MODEL:-opus}"
   echo "Planning with model: $PLAN_MODEL"
@@ -275,10 +275,10 @@ export RALPH_ORCHESTRATED=true
 STUCK_FILE=".ralph_stuck_tracker"
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"
 
-# Source stuck tracker functions (shared with loop.sh)
+# Source stuck tracker functions (shared with ralph.sh)
 source "$ORCHESTRATOR_DIR/scripts/stuck-tracker.sh"
 
-# Create temp file for capturing loop.sh output (error classification)
+# Create temp file for capturing ralph.sh output (error classification)
 TEMP_OUTPUT=$(mktemp)
 
 # Clean up stuck tracker, temp file, and error handler state on exit
@@ -382,11 +382,11 @@ while true; do
   token_estimate=$(estimate_prompt_tokens "$PROMPT_FILE")
   echo "Token estimate: ~$token_estimate (from $PROMPT_FILE)"
 
-  # Build loop.sh arguments: run exactly 1 iteration
+  # Build ralph.sh arguments: run exactly 1 iteration
   LOOP_ARGS=("1" "--model" "$selected_model")
   [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
 
-  # Invoke loop.sh with the selected model for 1 iteration
+  # Invoke ralph.sh with the selected model for 1 iteration
   # Capture combined stdout+stderr to temp file for error classification
   export RALPH_MODEL="$selected_model"
   set +e
