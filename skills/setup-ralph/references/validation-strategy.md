@@ -135,6 +135,19 @@ The orchestrator (`orchestrator.sh`) provides a second backpressure layer at the
 - After 3 overloaded failures: escalates to rate limit treatment
 - The same task is retried after recovery
 
+**CAPACITY_MONITORING** (Proactive backpressure)
+- Before each iteration, the orchestrator checks Claude OAuth capacity via `capacity-monitor.sh`
+- Exposes four metrics: `CAPACITY_5H_REMAINING_PCT`, `CAPACITY_5H_RESET_EPOCH`, `CAPACITY_WEEKLY_REMAINING_PCT`, `CAPACITY_WEEKLY_RESET_EPOCH`
+- 5-hour threshold rules:
+  - <5% remaining: sleep until full 5h reset
+  - <20% remaining: sleep for 1/3 of reset window
+- Weekly threshold rules (work-week aware, using `date +%u` and `date +%H%M`):
+  - Mon-Fri 09:00-18:00 (business hours): <20% remaining triggers sleep
+  - Weekend/after-hours: <10% remaining triggers sleep
+- Sleeps in 30s chunks with status-file exit checks (respects Ctrl+C)
+- Prevents task execution if capacity thresholds are triggered
+- Reduces USAGE_EXHAUSTED errors in production loops
+
 **USAGE_EXHAUSTED** ("usage limit" or "5-hour window")
 - Computes remaining time from when the first successful iteration was recorded
 - Sleeps exactly until the 5-hour window resets (plus 5-minute buffer)
