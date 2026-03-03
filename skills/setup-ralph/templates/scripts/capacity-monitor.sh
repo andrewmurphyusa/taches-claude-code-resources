@@ -134,13 +134,13 @@ _check_5h_capacity() {
   fi
 }
 
-# _check_weekly_capacity <agent> <pct_5h> <pct_weekly> <reset_epoch>
+# _check_weekly_capacity <agent> <remaining_pct_5h> <remaining_pct_weekly> <reset_epoch>
 # Applies weekly limit rules with work-week/weekend awareness.
-# Receives pct_5h so log lines can include both percentages (canonical format).
+# Receives remaining_pct_5h so log lines can include both percentages (canonical format).
 _check_weekly_capacity() {
   local agent="$1"
-  local pct_5h="$2"
-  local pct_weekly="$3"
+  local remaining_pct_5h="$2"
+  local remaining_pct_weekly="$3"
   local reset_epoch="$4"
   local is_work reset_in_work fresh_pct
 
@@ -159,21 +159,21 @@ _check_weekly_capacity() {
 
   # Decision matrix
   if [ "$is_work" = false ] && [ "$reset_in_work" = false ]; then
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause (currently weekend, reset in weekend: skipping pause)"
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause (currently weekend, reset in weekend: skipping pause)" >> "$LOG_FILE"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause (currently weekend, reset in weekend: skipping pause)"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause (currently weekend, reset in weekend: skipping pause)" >> "$LOG_FILE"
 
   elif [ "$is_work" = false ] && [ "$reset_in_work" = true ]; then
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause (currently weekend, reset in work-week: skipping pause)"
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause (currently weekend, reset in work-week: skipping pause)" >> "$LOG_FILE"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause (currently weekend, reset in work-week: skipping pause)"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause (currently weekend, reset in work-week: skipping pause)" >> "$LOG_FILE"
 
   elif [ "$is_work" = true ] && [ "$reset_in_work" = false ]; then
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause (weekly reset in weekend: skipping pause)"
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause (weekly reset in weekend: skipping pause)" >> "$LOG_FILE"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause (weekly reset in weekend: skipping pause)"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause (weekly reset in weekend: skipping pause)" >> "$LOG_FILE"
 
   else
     # is_work=true AND reset_in_work=true: active pause loop
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause, checking again in 30s"
-    echo "[CAPACITY] $agent 5h=${pct_5h}% weekly=${pct_weekly}% — work-week pause, checking again in 30s" >> "$LOG_FILE"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause, checking again in 30s"
+    echo "[CAPACITY] $agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — work-week pause, checking again in 30s" >> "$LOG_FILE"
 
     while true; do
       _capacity_sleep_with_status_check 30 "$agent weekly-pause"
@@ -182,7 +182,7 @@ _check_weekly_capacity() {
       if fetch_${agent}_capacity 2>/dev/null; then
         fresh_pct=$CAPACITY_WEEKLY_REMAINING_PCT
       else
-        fresh_pct=$pct_weekly  # fallback to last known value on fetch failure
+        fresh_pct=$remaining_pct_weekly  # fallback to last known value on fetch failure
       fi
 
       # Exit conditions: capacity recovered or we've left the work week
@@ -213,7 +213,7 @@ _check_weekly_capacity() {
 # threshold rules (sleeping as needed). Never returns non-zero — failures are
 # logged and skipped so Ralph is never blocked by a broken capacity endpoint.
 check_all_agent_capacity() {
-  local pct_5h epoch_5h pct_weekly epoch_weekly
+  local remaining_pct_5h epoch_5h remaining_pct_weekly epoch_weekly
   local now wait_secs time_until_reset sleep_secs
 
   for _agent in $CAPACITY_AGENTS; do
@@ -223,46 +223,46 @@ check_all_agent_capacity() {
     fi
 
     # Read the four standard variables set by the fetch function
-    pct_5h=$CAPACITY_5H_REMAINING_PCT
+    remaining_pct_5h=$CAPACITY_5H_REMAINING_PCT
     epoch_5h=$CAPACITY_5H_RESET_EPOCH
-    pct_weekly=$CAPACITY_WEEKLY_REMAINING_PCT
+    remaining_pct_weekly=$CAPACITY_WEEKLY_REMAINING_PCT
     epoch_weekly=$CAPACITY_WEEKLY_RESET_EPOCH
 
     # Apply 5h threshold rules (log first, then sleep via helper)
-    if [ "$pct_5h" -lt "$CAPACITY_5H_CRITICAL_PCT" ]; then
+    if [ "$remaining_pct_5h" -lt "$CAPACITY_5H_CRITICAL_PCT" ]; then
       now=$(date +%s)
       if [ "${epoch_5h:-0}" -gt "$now" ] 2>/dev/null && [ "${epoch_5h:-0}" -gt 0 ] 2>/dev/null; then
         wait_secs=$((epoch_5h - now + 30))
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — waiting until 5h reset (${wait_secs}s)"
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — waiting until 5h reset (${wait_secs}s)" >> "$LOG_FILE"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting until 5h reset (${wait_secs}s)"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting until 5h reset (${wait_secs}s)" >> "$LOG_FILE"
       else
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — 5h critical (no reset epoch, continuing)"
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — 5h critical (no reset epoch, continuing)" >> "$LOG_FILE"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — 5h critical (no reset epoch, continuing)"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — 5h critical (no reset epoch, continuing)" >> "$LOG_FILE"
       fi
-      _check_5h_capacity "$_agent" "$pct_5h" "$epoch_5h"
+      _check_5h_capacity "$_agent" "$remaining_pct_5h" "$epoch_5h"
 
-    elif [ "$pct_5h" -lt "$CAPACITY_5H_WARN_PCT" ]; then
+    elif [ "$remaining_pct_5h" -lt "$CAPACITY_5H_WARN_PCT" ]; then
       now=$(date +%s)
       time_until_reset=$((${epoch_5h:-0} - now))
       if [ "$time_until_reset" -gt 0 ] && [ "${epoch_5h:-0}" -gt 0 ] 2>/dev/null; then
         sleep_secs=$((time_until_reset / 3))
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — waiting 1/3 of reset window (${sleep_secs}s)"
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — waiting 1/3 of reset window (${sleep_secs}s)" >> "$LOG_FILE"
-        _check_5h_capacity "$_agent" "$pct_5h" "$epoch_5h"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting 1/3 of reset window (${sleep_secs}s)"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting 1/3 of reset window (${sleep_secs}s)" >> "$LOG_FILE"
+        _check_5h_capacity "$_agent" "$remaining_pct_5h" "$epoch_5h"
       else
         # Window already reset — treat as OK
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — OK"
-        echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — OK" >> "$LOG_FILE"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK"
+        echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK" >> "$LOG_FILE"
       fi
 
-    elif [ "$pct_weekly" -lt "$CAPACITY_WEEKLY_WARN_PCT" ]; then
+    elif [ "$remaining_pct_weekly" -lt "$CAPACITY_WEEKLY_WARN_PCT" ]; then
       # 5h is fine; weekly is low — weekly function logs its own status
-      _check_weekly_capacity "$_agent" "$pct_5h" "$pct_weekly" "$epoch_weekly"
+      _check_weekly_capacity "$_agent" "$remaining_pct_5h" "$remaining_pct_weekly" "$epoch_weekly"
 
     else
       # Both thresholds OK
-      echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — OK"
-      echo "[CAPACITY] $_agent 5h=${pct_5h}% weekly=${pct_weekly}% — OK" >> "$LOG_FILE"
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK"
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK" >> "$LOG_FILE"
     fi
 
   done

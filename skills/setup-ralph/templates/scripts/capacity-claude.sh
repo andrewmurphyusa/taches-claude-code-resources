@@ -26,6 +26,11 @@ CAPACITY_BETA_HEADER="anthropic-beta: oauth-2025-04-20"
 CAPACITY_CREDS_FILE="$HOME/.claude/.credentials.json"
 
 # ============================================================================
+# Export the capacity-cache-file name for embedding in python3 snippets
+# ============================================================================
+export CAPACITY_CACHE_FILE
+
+# ============================================================================
 # PUBLIC FUNCTIONS
 # ============================================================================
 
@@ -59,8 +64,8 @@ except Exception:
   # 3. Cache TTL check — use python3 for cross-platform mtime
   MTIME=$(python3 -c "
 import os, time
-f='$CAPACITY_CACHE_FILE'
-print(int(time.time() - os.path.getmtime(f))) if os.path.exists(f) else print(9999)
+capacity_cache_file = os.getenv('CAPACITY_CACHE_FILE')
+print(int(time.time() - os.path.getmtime(capacity_cache_file))) if os.path.exists(capacity_cache_file) else print(9999)
 " 2>/dev/null)
 
   if [ "${MTIME:-9999}" -lt "$CAPACITY_CACHE_TTL" ] 2>/dev/null; then
@@ -99,10 +104,10 @@ print(int(time.time() - os.path.getmtime(f))) if os.path.exists(f) else print(99
 
   # 8. Parse cached/fresh JSON with python3
   PARSE_RESULT=$(python3 -c "
-import json, sys
+import json, sys, os
 from datetime import datetime, timezone
 try:
-  d = json.load(open('$CAPACITY_CACHE_FILE'))
+  d = json.load(open(os.getenv('CAPACITY_CACHE_FILE')))
   fh = d.get('five_hour') or {}
   sd = d.get('seven_day') or {}
   util_5h  = int(fh.get('utilization', 0))
