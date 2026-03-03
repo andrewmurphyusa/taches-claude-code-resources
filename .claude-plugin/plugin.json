@@ -1,7 +1,7 @@
 {
   "name": "voodoobunny-fork-of-taches-cc-resources",
   "description": "Curated Claude Code skills and commands for prompt engineering, MCP servers, subagents, hooks, and productivity workflows. Based on taches-cc-resources by Lex Christopherson — extended with an improved Ralph Wiggum autonomous coding loop (orchestrator, model routing, error recovery, task decomposition).",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "author": {
     "name": "andrewmurphyusa",
     "email": "voodoobunny@hotmail.com"
