@@ -28,14 +28,13 @@ error handling patterns) and follow them exactly in new code.
 
 ### Bash constraints
 
-- Bash only — no Python, no Node, no awk one-liners beyond simple field extraction
+- Bash primary language; python3 is acceptable for JSON parsing and date/time conversion only — no other external interpreters (Node, Ruby, Perl, awk one-liners beyond simple field extraction)
 - All arithmetic via `$(( ))` — no `bc`, no `expr`
 - Cross-platform `date` handling:
   - Never use `date -d` (Linux-only)
   - Use epoch arithmetic: `$(date +%s)` gives current epoch on both platforms
-  - For converting a timestamp TO epoch from a string, use Python as a last resort
-    only if no pure-bash alternative exists; prefer formats that can be parsed
-    with epoch arithmetic alone
+  - For converting a timestamp TO epoch from a string, use python3 with `datetime.fromisoformat()` for ISO 8601 parsing
+  - Use python3 for all JSON parsing (OAuth token extraction, API response parsing)
 - Status file check during sleep must use the same pattern as the existing stop-signal
   check in `orchestrator.sh` (grep for BREAK|INTERRUPT|STOP)
 

@@ -30,3 +30,7 @@ REPORT.md
 REPORT.accumulated.md
 .ralph_stuck_tracker
 .ralph_window_start
+
+# Capacity monitoring cache and state files (defensive — never commit)
+/tmp/ralph-usage-cache.json
+.ralph_capacity_*
