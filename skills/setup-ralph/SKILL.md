@@ -29,7 +29,7 @@ The loop feeds a prompt file to Claude, the agent completes one task, updates th
 
 **Your Role**: Ralph does all the work, including deciding which planned work to implement next and how to implement it. Your job is to engineer the environment.
 
-**Backpressure**: Create backpressure via tests, typechecks, lints, builds that reject invalid/unacceptable work. The orchestrator adds a second backpressure layer at the infrastructure level: rate limits, overload, and usage exhaustion are recovered automatically.
+**Backpressure**: Create backpressure via tests, typechecks, lints, builds that reject invalid/unacceptable work. The orchestrator adds a second backpressure layer at the infrastructure level: rate limits, overload, and usage exhaustion are recovered automatically. Additionally, capacity monitoring proactively prevents capacity-based errors by sleeping when thresholds trigger.
 
 **Observation**: Watch, especially early on. Prompts evolve through observed failure patterns.
 
@@ -40,6 +40,8 @@ The loop feeds a prompt file to Claude, the agent completes one task, updates th
 **Dynamic Model Routing**: The orchestrator classifies each task and selects the cheapest capable model. Simple tasks (rename, reformat) use haiku; standard work uses sonnet; complex tasks (architect, debug, investigate) use opus. Annotate tasks explicitly with `[opus]`/`[sonnet]`/`[haiku]` to override.
 
 **Stuck Escalation**: When the same task fails twice, the orchestrator automatically upgrades the model tier one step (haiku→sonnet→opus) before retrying. After max failures the task is skipped.
+
+**Capacity Monitoring**: Before each iteration, the orchestrator proactively checks Claude OAuth capacity and sleeps if thresholds are triggered (5-hour window <5% or <20%, weekly window awareness). This prevents USAGE_EXHAUSTED errors in production loops and allows Ralph to gracefully pause during capacity-constrained periods.
 
 **Remote Backup**: The loop automatically creates a private GitHub repo and pushes after each commit. This protects against accidental data loss from autonomous operations. Requires `gh` CLI authenticated. Disable with `RALPH_BACKUP=false`.
 
