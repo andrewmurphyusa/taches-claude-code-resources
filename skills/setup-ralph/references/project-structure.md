@@ -53,6 +53,8 @@ Helper scripts sourced by `orchestrator.sh` and `ralph.sh`.
 - **`scripts/model-config.sh`** — Model tier constants (`MODEL_HAIKU`, `MODEL_SONNET`, `MODEL_OPUS`) and `validate_model()` / `upgrade_tier()`.
 - **`scripts/error-handler.sh`** — Error classification (`classify_error()`), 5-hour window tracking, rate limit backoff, overload retry.
 - **`scripts/stuck-tracker.sh`** — Shared stuck detection state. Sourced by both orchestrator and loop so they share the same tracker lifecycle.
+- **`scripts/capacity-claude.sh`** — Claude-specific capacity fetcher. Reads OAuth credentials, calls Anthropic usage API, caches results, exposes `CAPACITY_5H_REMAINING_PCT`, `CAPACITY_5H_RESET_EPOCH`, `CAPACITY_WEEKLY_REMAINING_PCT`, `CAPACITY_WEEKLY_RESET_EPOCH`.
+- **`scripts/capacity-monitor.sh`** — Shared capacity monitoring orchestration layer. Sources per-agent fetchers, checks thresholds, implements 5h/weekly backpressure rules with work-week/weekend awareness.
 
 Located at `scripts/` subdirectory.
 
@@ -150,7 +152,9 @@ project-root/
 │   ├── classify-task.sh       # Task complexity classifier
 │   ├── model-config.sh        # Model tier constants
 │   ├── error-handler.sh       # Error classification and recovery
-│   └── stuck-tracker.sh       # Shared stuck detection
+│   ├── stuck-tracker.sh       # Shared stuck detection
+│   ├── capacity-claude.sh     # Claude OAuth capacity fetcher
+│   └── capacity-monitor.sh    # Shared capacity monitoring orchestration
 ├── PROMPT_plan.md             # Planning mode instructions
 ├── PROMPT_build.md            # Building mode instructions
 ├── PROMPT_decompose.md        # Decompose mode instructions
@@ -309,7 +313,9 @@ project-root/
 │   ├── classify-task.sh
 │   ├── model-config.sh
 │   ├── error-handler.sh
-│   └── stuck-tracker.sh
+│   ├── stuck-tracker.sh
+│   ├── capacity-claude.sh
+│   └── capacity-monitor.sh
 ├── PROMPT_build.md            # Building instructions
 ├── IMPLEMENTATION_PLAN.md     # Empty initially
 └── src/                       # Your code
