@@ -31,6 +31,7 @@ sed_i() {
 source "$ORCHESTRATOR_DIR/scripts/model-config.sh"
 source "$ORCHESTRATOR_DIR/scripts/classify-task.sh"
 source "$ORCHESTRATOR_DIR/scripts/error-handler.sh"
+source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
 
 # Load optional cloud credentials from auth/*.sh (excluding .example templates)
 load_cloud_credentials() {
@@ -311,6 +312,9 @@ while true; do
     exit 0
   fi
 
+  # Check agent capacity before each iteration (sleeps if thresholds triggered)
+  check_all_agent_capacity || true
+
   # Check if plan exists
   if [ ! -f "$PLAN_FILE" ]; then
     echo "Error: $PLAN_FILE not found."
@@ -417,8 +421,22 @@ while true; do
         continue
         ;;
       USAGE_EXHAUSTED)
-        echo "Usage window exhausted — sleeping until reset."
-        sleep_until_window_resets
+        echo "Usage window exhausted — fetching fresh capacity data."
+        # Invalidate stale cache so next fetch gets server-authoritative reset epoch
+        for _exhausted_agent in $CAPACITY_AGENTS; do
+          invalidate_${_exhausted_agent}_capacity_cache 2>/dev/null || true
+        done
+        # Re-fetch fresh capacity to populate CAPACITY_5H_RESET_EPOCH
+        check_all_agent_capacity || true
+        # Prefer server-authoritative reset epoch over WINDOW_START_FILE estimate
+        _now=$(date +%s)
+        if [ "${CAPACITY_5H_RESET_EPOCH:-0}" -gt "$_now" ] 2>/dev/null; then
+          _wait=$(( CAPACITY_5H_RESET_EPOCH - _now + 30 ))
+          echo "Sleeping ${_wait}s until server-reported 5h reset (epoch $CAPACITY_5H_RESET_EPOCH)."
+          sleep "$_wait"
+        else
+          sleep_until_window_resets
+        fi
         # Don't increment ITERATION — retry the same task after sleep
         ITERATION=$((ITERATION - 1))
         continue
