@@ -191,16 +191,16 @@ check_all_tasks_complete() {
     return 1
   fi
   local incomplete
-  incomplete=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null || echo "0")
+  incomplete=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
   if [ "$incomplete" -eq 0 ]; then
     local completed
-    completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+    completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
     if [ "$completed" -gt 0 ]; then
       return 0
     fi
     # All remaining tasks are skipped — nothing left to execute
     local skipped
-    skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+    skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
     if [ "$skipped" -gt 0 ]; then
       echo "All remaining tasks are skipped — nothing to execute"
       return 0

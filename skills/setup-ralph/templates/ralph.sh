@@ -198,17 +198,17 @@ check_all_tasks_complete() {
   fi
 
   # Count incomplete tasks (lines with "- [ ]")
-  local incomplete=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null || echo "0")
+  local incomplete=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
 
   if [ "$incomplete" -eq 0 ]; then
     # Double-check there are actually completed tasks
-    local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+    local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
     if [ "$completed" -gt 0 ]; then
       return 0  # All tasks complete
     fi
 
     # All remaining tasks are skipped — nothing left to execute
-    local skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null || echo "0")
+    local skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
     if [ "$skipped" -gt 0 ]; then
       echo "All remaining tasks are skipped — nothing to execute"
       return 0
@@ -269,8 +269,8 @@ print_iteration_summary() {
   fi
 
   # Get progress
-  local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null || echo "0")
-  local total_tasks=$(grep -c '^\s*- \[' "$PLAN_FILE" 2>/dev/null || echo "0")
+  local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
+  local total_tasks=$(grep -c '^\s*- \[' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
   local pct=0
   if [ "$total_tasks" -gt 0 ]; then
     pct=$((completed * 100 / total_tasks))
@@ -317,11 +317,6 @@ generate_report() {
   local duration=$((end_time - START_TIME))
   local minutes=$((duration / 60))
   local seconds=$((duration % 60))
-
-  # local completed=$(grep -c '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null || echo "0")
-  # local skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null || echo "0")
-  # local remaining=$(grep -c '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null || echo "0")
-  # local total=$((completed + skipped + remaining))
 
   local completed=$(grep -c '^[[:space:]]*- \[x\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
   local skipped=$(grep -c '^[[:space:]]*- \[S\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
