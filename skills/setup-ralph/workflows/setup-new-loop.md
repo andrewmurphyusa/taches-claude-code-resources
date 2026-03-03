@@ -90,6 +90,8 @@ mkdir -p specs src scripts auth
 - `scripts/model-config.sh` - Model tier constants (from templates/scripts/model-config.sh)
 - `scripts/error-handler.sh` - Error classification and recovery (from templates/scripts/error-handler.sh)
 - `scripts/stuck-tracker.sh` - Shared stuck detection (from templates/scripts/stuck-tracker.sh)
+- `scripts/capacity-claude.sh` - Claude OAuth capacity fetcher (from templates/scripts/capacity-claude.sh)
+- `scripts/capacity-monitor.sh` - Shared capacity monitoring orchestration (from templates/scripts/capacity-monitor.sh)
 - `PROMPT_plan.md` - Planning mode instructions (from templates/PROMPT_plan.md)
 - `PROMPT_build.md` - Building mode instructions (from templates/PROMPT_build.md)
 - `PROMPT_decompose.md` - Decompose mode instructions (from templates/PROMPT_decompose.md)
@@ -115,11 +117,13 @@ mkdir -p specs src scripts auth
 
 Copy `templates/orchestrator.sh` to target directory as `orchestrator.sh`.
 
-Copy all four scripts from `templates/scripts/` to the target `scripts/` directory:
+Copy all six scripts from `templates/scripts/` to the target `scripts/` directory:
 - `scripts/classify-task.sh`
 - `scripts/model-config.sh`
 - `scripts/error-handler.sh`
 - `scripts/stuck-tracker.sh`
+- `scripts/capacity-claude.sh`
+- `scripts/capacity-monitor.sh`
 
 Copy `templates/ralph.sh` to target directory as `ralph.sh`.
 
@@ -320,7 +324,7 @@ This workflow is complete when:
 - [ ] Directory structure created with all required files and subdirectories (scripts/, auth/)
 - [ ] orchestrator.sh deployed as primary entry point
 - [ ] ralph.sh deployed as underlying engine
-- [ ] All four scripts/ helper files deployed
+- [ ] All six scripts/ helper files deployed (classify-task, model-config, error-handler, stuck-tracker, capacity-claude, capacity-monitor)
 - [ ] PROMPT_plan.md generated with appropriate settings
 - [ ] PROMPT_build.md generated with validation commands
 - [ ] PROMPT_decompose.md deployed
