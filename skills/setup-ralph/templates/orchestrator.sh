@@ -3,10 +3,10 @@
 # Wraps ralph.sh with dynamic model selection based on task complexity
 #
 # Usage:
-#   ./orchestrator.sh              # Build mode, auto-select model per task
-#   ./orchestrator.sh plan         # Plan mode (uses opus)
+#   ./orchestrator.sh              # Build action, auto-select model per task
+#   ./orchestrator.sh plan         # Plan action (uses opus)
 #   ./orchestrator.sh decompose   # Decompose complex tasks (uses opus, one-shot)
-#   ./orchestrator.sh 10           # Build mode, max 10 iterations
+#   ./orchestrator.sh 10           # Build action, max 10 iterations
 #   ./orchestrator.sh --model opus # Force a specific model (disables routing)
 #   ./orchestrator.sh --help       # Show usage
 
@@ -86,7 +86,7 @@ FORCED_MODEL=""             # If set, overrides routing for all tasks
 # ARGUMENT PARSING
 # ============================================================================
 
-MODE="build"
+ACTION="build"
 LIMIT=""
 VERBOSE=""
 PASSTHROUGH_ARGS=()
@@ -95,14 +95,17 @@ print_help() {
   echo "Improved Ralph Orchestrator — dynamic model routing for autonomous coding"
   echo ""
   echo "Usage: $0 [plan] [limit] [--model MODEL] [--verbose] [--no-routing] [--help]"
+  echo "Usage: $0 [plan|decompose] [limit] [--action ACTION] [--limit N] [--model MODEL] [--verbose] [--no-routing] [--help]"
   echo ""
-  echo "Modes:"
-  echo "  (default)        Build mode — pick tasks, implement, validate, commit"
-  echo "  plan             Plan mode — generate/update IMPLEMENTATION_PLAN.md"
+  echo "Actions:"
+  echo "  (default)        Build action — pick tasks, implement, validate, commit"
+  echo "  plan             Plan action — generate/update IMPLEMENTATION_PLAN.md"
   echo "  decompose        Decompose complex tasks into tier-annotated subtasks"
   echo ""
   echo "Options:"
   echo "  [number]         Max iterations (e.g., 10)"
+  echo "  --action ACTION  Set action explicitly (build|plan|decompose)"
+  echo "  --limit N        Max iterations (same as providing a number)"
   echo "  --model MODEL    Force a model (haiku|sonnet|opus) — disables routing"
   echo "  --verbose        Enable verbose Claude output"
   echo "  --no-routing     Disable model routing (use RALPH_MODEL or default)"
@@ -126,7 +129,7 @@ print_help() {
   echo "Examples:"
   echo "  $0                   # Build with auto model selection"
   echo "  $0 plan              # Generate implementation plan"
-  echo "  $0 20                # Build mode, max 20 iterations"
+  echo "  $0 20                # Build action, max 20 iterations"
   echo "  $0 --model sonnet    # Force sonnet for all tasks"
   echo "  $0 plan --model opus # Plan with opus"
   echo "  $0 decompose         # Decompose complex tasks (pre-build step)"
@@ -135,13 +138,59 @@ print_help() {
 while [[ $# -gt 0 ]]; do
   case $1 in
     plan)
-      MODE="plan"
+      ACTION="plan"
       shift
       ;;
     decompose)
-      MODE="decompose"
+      ACTION="decompose"
       shift
       ;;
+    --action)
+      # --action build|plan|decompose
+      ACTION="$2"
+      if [ -z "${ACTION:-}" ]; then
+        echo "Error: --action requires a value (build|plan|decompose)"
+        exit 1
+      fi
+      case "$ACTION" in
+        build|plan|decompose) ;;
+        *)
+          echo "Error: Invalid --action '$ACTION' (allowed: build|plan|decompose)"
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;
+    --action=*)
+      ACTION="${1#*=}"
+      case "$ACTION" in
+        build|plan|decompose) ;;
+        *)
+          echo "Error: Invalid --action '$ACTION' (allowed: build|plan|decompose)"
+          exit 1
+          ;;
+      esac
+      shift
+      ;
+
+    --limit)
+      # --limit N
+      LIMIT="$2"
+      if [ -z "${LIMIT:-}" ] || ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+        echo "Error: --limit requires an integer"
+        exit 1
+      fi
+      shift 2
+      ;
+    --limit=*)
+      LIMIT="${1#*=}"
+      if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+        echo "Error: --limit requires an integer"
+        exit 1
+      fi
+      shift
+      ;
+
     [0-9]*)
       LIMIT=$1
       shift
@@ -219,7 +268,7 @@ echo "RUNNING" > "$STATUS_FILE"
 echo "============================================"
 echo "  Improved Ralph Orchestrator"
 echo "============================================"
-echo "Mode:    $MODE"
+echo "Action:    $ACTION"
 echo "Routing: $ROUTING_ENABLED"
 if [ -n "$FORCED_MODEL" ]; then
   echo "Model:   $FORCED_MODEL (forced)"
@@ -231,8 +280,8 @@ echo "Loop:    $LOOP_SH"
 echo "============================================"
 echo ""
 
-# Plan mode: always use opus, run ralph.sh directly
-if [ "$MODE" = "plan" ]; then
+# Plan action: always use opus, run ralph.sh directly
+if [ "$ACTION" = "plan" ]; then
   PLAN_MODEL="${FORCED_MODEL:-opus}"
   echo "Planning with model: $PLAN_MODEL"
   echo ""
@@ -245,8 +294,8 @@ if [ "$MODE" = "plan" ]; then
   RALPH_MODEL="$PLAN_MODEL" exec bash "$LOOP_SH" "${LOOP_ARGS[@]}"
 fi
 
-# Decompose mode: one-shot opus analysis to split complex tasks
-if [ "$MODE" = "decompose" ]; then
+# Decompose action: one-shot opus analysis to split complex tasks
+if [ "$ACTION" = "decompose" ]; then
   DECOMPOSE_MODEL="${FORCED_MODEL:-opus}"
   DECOMPOSE_PROMPT="$ORCHESTRATOR_DIR/PROMPT_decompose.md"
 
@@ -271,7 +320,7 @@ if [ "$MODE" = "decompose" ]; then
   exit $?
 fi
 
-# Build mode: iterate with per-task model routing
+# Build action: iterate with per-task model routing
 export RALPH_ORCHESTRATED=true
 STUCK_FILE=".ralph_stuck_tracker"
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"
