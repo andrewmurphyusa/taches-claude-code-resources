@@ -235,6 +235,18 @@ STUCK_FILE=".ralph_stuck_tracker"
 source "$LOOP_DIR/scripts/stuck-tracker.sh"
 
 # ============================================================================
+# CAPACITY MONITORING (Claude throttling)
+# ============================================================================
+
+# Optional: orchestrator sources this already, but ralph.sh must also do it
+# so throttling works in plan mode and when ralph.sh is run directly.
+if [ -f "$LOOP_DIR/scripts/capacity-monitor.sh" ]; then
+  source "$LOOP_DIR/scripts/capacity-monitor.sh"
+else
+  echo "Warning: capacity-monitor.sh not found at $LOOP_DIR/scripts/capacity-monitor.sh"
+fi
+
+# ============================================================================
 # ITERATION SUMMARY
 # ============================================================================
 
@@ -514,6 +526,12 @@ while true; do
     echo "=== Ralph stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
     cleanup "status_file"
     exit 0
+  fi
+
+  # Check Claude capacity before each iteration (may sleep if thresholds hit).
+  # Safe even if capacity-monitor.sh wasn’t sourced (function will be missing).
+  if command -v check_all_agent_capacity >/dev/null 2>&1; then
+    check_all_agent_capacity || true
   fi
 
   ITERATION_START=$(date +%s)
