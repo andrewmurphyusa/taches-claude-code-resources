@@ -215,7 +215,7 @@ while [[ $# -gt 0 ]]; do
     --5hr-remaining-threshold)
       OVERRIDE_5HR_THRESHOLD="$2"
       if [ -z "${OVERRIDE_5HR_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_5HR_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_THRESHOLD" -gt 100 ]; then
-        echo "Error: --5hr-threshold requires an integer 0-100"
+        echo "Error: --5hr-remaining-threshold requires an integer 0-100"
         exit 1
       fi
       shift 2
@@ -223,7 +223,7 @@ while [[ $# -gt 0 ]]; do
     --5hr-remaining-threshold=*)
       OVERRIDE_5HR_THRESHOLD="${1#*=}"
       if ! [[ "$OVERRIDE_5HR_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_THRESHOLD" -gt 100 ]; then
-        echo "Error: --5hr-threshold requires an integer 0-100"
+        echo "Error: --5hr-remaining-threshold requires an integer 0-100"
         exit 1
       fi
       shift
@@ -231,7 +231,7 @@ while [[ $# -gt 0 ]]; do
     --weekly-remaining-threshold)
       OVERRIDE_WEEKLY_THRESHOLD="$2"
       if [ -z "${OVERRIDE_WEEKLY_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_WEEKLY_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_WEEKLY_THRESHOLD" -gt 100 ]; then
-        echo "Error: --weekly-threshold requires an integer 0-100"
+        echo "Error: --weekly-remaining-threshold requires an integer 0-100"
         exit 1
       fi
       shift 2
@@ -239,7 +239,7 @@ while [[ $# -gt 0 ]]; do
     --weekly-remaining-threshold=*)
       OVERRIDE_WEEKLY_THRESHOLD="${1#*=}"
       if ! [[ "$OVERRIDE_WEEKLY_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_WEEKLY_THRESHOLD" -gt 100 ]; then
-        echo "Error: --weekly-threshold requires an integer 0-100"
+        echo "Error: --weekly-remaining-threshold requires an integer 0-100"
         exit 1
       fi
       shift
@@ -260,7 +260,7 @@ done
 # CAPACITY MONITOR (source after arg parsing so CLI overrides apply)
 # ============================================================================
 if [ -n "${OVERRIDE_5HR_THRESHOLD:-}" ]; then
-  export CAPACITY_5H_WARN_PCT="$OVERRIDE_5HR_THRESHOLD"
+  export CAPACITY_5H_CRITICAL_PCT="$OVERRIDE_5HR_THRESHOLD"
 fi
 if [ -n "${OVERRIDE_WEEKLY_THRESHOLD:-}" ]; then
   export CAPACITY_WEEKLY_WARN_PCT="$OVERRIDE_WEEKLY_THRESHOLD"
@@ -268,6 +268,7 @@ fi
 
 # Load capacity monitoring after overrides are exported
 source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
+
 # ============================================================================
 # TASK READING
 # ============================================================================
