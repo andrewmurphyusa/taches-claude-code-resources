@@ -91,14 +91,16 @@ VERBOSE=""
 PASSTHROUGH_ARGS=()
 
 # Capacity threshold overrides (applied via env vars before sourcing capacity-monitor.sh)
-OVERRIDE_5HR_THRESHOLD=""
-OVERRIDE_WEEKLY_THRESHOLD=""
+OVERRIDE_5HR_WARN_THRESHOLD=""
+OVERRIDE_5HR_CRIT_THRESHOLD=""
+OVERRIDE_WEEKLY_WARN_THRESHOLD=""
 
 print_help() {
   echo "Improved Ralph Orchestrator — dynamic model routing for autonomous coding"
   echo ""
   echo "Usage: $0 [plan] [limit] [--model MODEL] [--verbose] [--no-routing] [--help]"
-  echo "Usage: $0 [plan|decompose] [limit] [--action ACTION] [--limit N] [--model MODEL] [--verbose] [--no-routing] [--help]"
+  echo "Usage: $0 [plan|decompose] [limit] [--limit N] [--action ACTION] [--model MODEL] [--verbose] [--no-routing] [--help]"
+  echo "Additional parameters: [--5hr-remaining-warning-threshold N] [--5hr-remaining-critical-threshold N] [--weekly-remaining-warning-threshold N]"
   echo ""
   echo "Actions:"
   echo "  (default)        Build action — pick tasks, implement, validate, commit"
@@ -106,14 +108,15 @@ print_help() {
   echo "  decompose        Decompose complex tasks into tier-annotated subtasks"
   echo ""
   echo "Options:"
-  echo "  [number]                          Max iterations (e.g., 10)"
-  echo "  --action ACTION                   Set action explicitly (build|plan|decompose)"
-  echo "  --limit N                         Max iterations (same as providing a number)"
-  echo "  --model MODEL                     Force a model (haiku|sonnet|opus) — disables routing"
-  echo "  --verbose                         Enable verbose Claude output"
-  echo "  --no-routing                      Disable model routing (use RALPH_MODEL or default)"
-  echo "  --5hr-remaining-threshold N       Override 5h WARN threshold (remaining %); triggers pre-sleep when below N"
-  echo "  --weekly-remaining-threshold N    Override weekly WARN threshold (remaining %); triggers work-week pause when below N"
+  echo "  [number]                                  Max iterations (e.g., 10)"
+  echo "  --action ACTION                           Set action explicitly (build|plan|decompose)"
+  echo "  --limit N                                 Max iterations (same as providing a number)"
+  echo "  --model MODEL                             Force a model (haiku|sonnet|opus) — disables routing"
+  echo "  --verbose                                 Enable verbose Claude output"
+  echo "  --no-routing                              Disable model routing (use RALPH_MODEL or default)"
+  echo "  --5hr-remaining-warning-threshold N       Override 5h WARN threshold (remaining %); triggers pre-sleep when below N"
+  echo "  --5hr-remaining-critical-threshold N       Override 5h CRITICAL threshold (remaining %); triggers pre-sleep when below N"
+  echo "  --weekly-remaining-warning-threshold N    Override weekly WARN threshold (remaining %); triggers work-week pause when below N"
   echo "  --help                            Show this help message"
   echo ""
   echo "Model Routing:"
@@ -212,34 +215,50 @@ while [[ $# -gt 0 ]]; do
       ROUTING_ENABLED=false
       shift
       ;;
-    --5hr-remaining-threshold)
-      OVERRIDE_5HR_THRESHOLD="$2"
-      if [ -z "${OVERRIDE_5HR_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_5HR_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_THRESHOLD" -gt 100 ]; then
-        echo "Error: --5hr-remaining-threshold requires an integer 0-100"
+    --5hr-remaining-warning-threshold)
+      OVERRIDE_5HR_WARN_THRESHOLD="$2"
+      if [ -z "${OVERRIDE_5HR_WARN_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_5HR_WARN_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_WARN_THRESHOLD" -gt 100 ]; then
+        echo "Error: --5hr-remaining-warning-threshold requires an integer 0-100"
         exit 1
       fi
       shift 2
       ;;
-    --5hr-remaining-threshold=*)
-      OVERRIDE_5HR_THRESHOLD="${1#*=}"
-      if ! [[ "$OVERRIDE_5HR_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_THRESHOLD" -gt 100 ]; then
-        echo "Error: --5hr-remaining-threshold requires an integer 0-100"
+    --5hr-remaining-warning-threshold=*)
+      OVERRIDE_5HR_WARN_THRESHOLD="${1#*=}"
+      if ! [[ "$OVERRIDE_5HR_WARN_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_WARN_THRESHOLD" -gt 100 ]; then
+        echo "Error: --5hr-remaining-warning-threshold requires an integer 0-100"
         exit 1
       fi
       shift
       ;;
-    --weekly-remaining-threshold)
-      OVERRIDE_WEEKLY_THRESHOLD="$2"
-      if [ -z "${OVERRIDE_WEEKLY_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_WEEKLY_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_WEEKLY_THRESHOLD" -gt 100 ]; then
-        echo "Error: --weekly-remaining-threshold requires an integer 0-100"
+    --5hr-remaining-critical-threshold)
+      OVERRIDE_5HR_CRIT_THRESHOLD="$2"
+      if [ -z "${OVERRIDE_5HR_CRIT_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_5HR_CRIT_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_CRIT_THRESHOLD" -gt 100 ]; then
+        echo "Error: --5hr-remaining-critical-threshold requires an integer 0-100"
         exit 1
       fi
       shift 2
       ;;
-    --weekly-remaining-threshold=*)
-      OVERRIDE_WEEKLY_THRESHOLD="${1#*=}"
-      if ! [[ "$OVERRIDE_WEEKLY_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_WEEKLY_THRESHOLD" -gt 100 ]; then
-        echo "Error: --weekly-remaining-threshold requires an integer 0-100"
+    --5hr-remaining-critical-threshold=*)
+      OVERRIDE_5HR_CRIT_THRESHOLD="${1#*=}"
+      if ! [[ "$OVERRIDE_5HR_CRIT_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_5HR_CRIT_THRESHOLD" -gt 100 ]; then
+        echo "Error: --5hr-remaining-critical-threshold requires an integer 0-100"
+        exit 1
+      fi
+      shift
+      ;;
+    --weekly-remaining-warning-threshold)
+      OVERRIDE_WEEKLY_WARN_THRESHOLD="$2"
+      if [ -z "${OVERRIDE_WEEKLY_WARN_THRESHOLD:-}" ] || ! [[ "$OVERRIDE_WEEKLY_WARN_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_WEEKLY_WARN_THRESHOLD" -gt 100 ]; then
+        echo "Error: --weekly-remaining-warning-threshold requires an integer 0-100"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --weekly-remaining-warning-threshold=*)
+      OVERRIDE_WEEKLY_WARN_THRESHOLD="${1#*=}"
+      if ! [[ "$OVERRIDE_WEEKLY_WARN_THRESHOLD" =~ ^[0-9]+$ ]] || [ "$OVERRIDE_WEEKLY_WARN_THRESHOLD" -gt 100 ]; then
+        echo "Error: --weekly-remaining-warning-threshold requires an integer 0-100"
         exit 1
       fi
       shift
@@ -259,15 +278,23 @@ done
 # ============================================================================
 # CAPACITY MONITOR (source after arg parsing so CLI overrides apply)
 # ============================================================================
-if [ -n "${OVERRIDE_5HR_THRESHOLD:-}" ]; then
-  export CAPACITY_5H_CRITICAL_PCT="$OVERRIDE_5HR_THRESHOLD"
+if [ -n "${OVERRIDE_5HR_CRIT_THRESHOLD:-}" ]; then
+  export CAPACITY_5H_CRIT_PCT="$OVERRIDE_5HR_CRIT_THRESHOLD"
 fi
-if [ -n "${OVERRIDE_WEEKLY_THRESHOLD:-}" ]; then
-  export CAPACITY_WEEKLY_WARN_PCT="$OVERRIDE_WEEKLY_THRESHOLD"
+if [ -n "${OVERRIDE_5HR_WARN_THRESHOLD:-}" ]; then
+  export CAPACITY_5H_WARN_PCT="$OVERRIDE_5HR_WARN_THRESHOLD"
+fi
+if [ -n "${OVERRIDE_WEEKLY_WARN_THRESHOLD:-}" ]; then
+  export CAPACITY_WEEKLY_WARN_PCT="$OVERRIDE_WEEKLY_WARN_THRESHOLD"
 fi
 
 # Load capacity monitoring after overrides are exported
 source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
+
+# debugging
+echo "CAPACITY_5H_CRIT_PCT = $CAPACITY_5H_CRIT_PCT"
+echo "CAPACITY_5H_WARN_PCT = $CAPACITY_5H_WARN_PCT"
+echo "CAPACITY_WEEKLY_WARN_PCT = $CAPACITY_WEEKLY_WARN_PCT"
 
 # ============================================================================
 # TASK READING
