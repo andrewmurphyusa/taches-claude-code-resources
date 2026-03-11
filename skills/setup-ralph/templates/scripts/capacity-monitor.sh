@@ -35,7 +35,7 @@ done
 # CONSTANTS (all overridable via environment)
 # ============================================================================
 
-CAPACITY_5H_CRITICAL_PCT="${CAPACITY_5H_CRITICAL_PCT:-5}"    # < 5%  → wait for full reset
+CAPACITY_5H_CRIT_PCT="${CAPACITY_5H_CRIT_PCT:-5}"    # < 5%  → wait for full reset
 CAPACITY_5H_WARN_PCT="${CAPACITY_5H_WARN_PCT:-20}"           # < 20% → sleep 1/3 of reset window
 CAPACITY_WEEKLY_WARN_PCT="${CAPACITY_WEEKLY_WARN_PCT:-20}"   # < 20% → conditional work-week pause
 CAPACITY_SLEEP_CHUNK="${CAPACITY_SLEEP_CHUNK:-30}"           # max seconds per sleep increment
@@ -113,7 +113,7 @@ _check_5h_capacity() {
   local reset_epoch="$3"
   local now wait_secs time_until_reset sleep_secs
 
-  if [ "$pct_remaining" -lt "$CAPACITY_5H_CRITICAL_PCT" ]; then
+  if [ "$pct_remaining" -lt "$CAPACITY_5H_CRIT_PCT" ]; then
     # Critical: wait for full 5h reset (+30s buffer for clock skew)
     now=$(date +%s)
     if [ "${reset_epoch:-0}" -gt "$now" ] 2>/dev/null && [ "${reset_epoch:-0}" -gt 0 ] 2>/dev/null; then
@@ -229,7 +229,7 @@ check_all_agent_capacity() {
     epoch_weekly=$CAPACITY_WEEKLY_RESET_EPOCH
 
     # Apply 5h threshold rules (log first, then sleep via helper)
-    if [ "$remaining_pct_5h" -lt "$CAPACITY_5H_CRITICAL_PCT" ]; then
+    if [ "$remaining_pct_5h" -lt "$CAPACITY_5H_CRIT_PCT" ]; then
       now=$(date +%s)
       if [ "${epoch_5h:-0}" -gt "$now" ] 2>/dev/null && [ "${epoch_5h:-0}" -gt 0 ] 2>/dev/null; then
         wait_secs=$((epoch_5h - now + 30))
