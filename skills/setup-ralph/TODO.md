@@ -8,6 +8,10 @@
 
 - check decompose mode for the same bug, and add stop conditions there if necessary
 
+## 2. Fix bug: decompose mode doesn't log to ralph.log ???
+
+Running "tail -f ralph.log", ran decompose, it decomposed tasks but nothing was logged to ralph.log!
+
 ## 2. Add iteration limits to plan and decompose modes.
 
 - plan & decompose modes currently do not have any iteration limiting
