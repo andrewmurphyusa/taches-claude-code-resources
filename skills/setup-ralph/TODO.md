@@ -12,12 +12,26 @@
 
 Running "tail -f ralph.log", ran decompose, it decomposed tasks but nothing was logged to ralph.log!
 
-## 2. Add iteration limits to plan and decompose modes.
+## 3. Fix bug: the task it *says* it's doing next/now isn't what it actually *picks to do* 
+
+This one is a bit bigger to fix, because it requires identifying the actual next task to work on in a separate place from the step that actually picks the next task, using the same logic.  It might be better to have it create a separate "NEXT-TASK.md" file, and populate that file from the orchestrator and pick it up in the ralph script
+
+## 4. Add iteration limits to plan and decompose modes.
 
 - plan & decompose modes currently do not have any iteration limiting
 - have them respect the iteration limits
 
-## 3. Add "--stop-after" parameter(s)
+## 5. Add "preferred" and "fallback" models (one for Claude, one for Codex)
+
+- Each task should have a "preferred" model and a "fallback" model
+- one should be Claude and one should be Codex (although neither is mandatory primary i.e. different task can *prefer* one over the other)
+- check capacity on the *primary*; if there is no capacity available there then check secondary; only sleep if *both* do not have capacity
+- sleep for the minimum amount of time required for *one* of them to become available
+- could get capacity for both, then check primary-then-secondary, then do sleep-until-capacity-available
+
+## 6. Could - remove iterations from ralph.sh entirely since it doesn't actually do them any more.
+
+## 7. Add "--stop-after" parameter(s)
 
 - add parameter(s) to limit the *clock time* that iterations will run until.
 - either have one parameter "--stop-after" which is a time OR a date-and-time
