@@ -356,18 +356,105 @@ echo "Loop:    $LOOP_SH"
 echo "============================================"
 echo ""
 
-# Plan action: always use opus, run ralph.sh directly
+# Plan action: always use opus, iterate with stop conditions
 if [ "$ACTION" = "plan" ]; then
   PLAN_MODEL="${FORCED_MODEL:-opus}"
-  echo "Planning with model: $PLAN_MODEL"
+  MAX_PLAN_ITERATIONS="${RALPH_PLAN_MAX_ITERATIONS:-5}"
+  echo "Planning with model: $PLAN_MODEL (max $MAX_PLAN_ITERATIONS iterations)"
   echo ""
 
-  LOOP_ARGS=("plan")
-  [ -n "$LIMIT" ] && LOOP_ARGS+=("$LIMIT")
-  LOOP_ARGS+=("--model" "$PLAN_MODEL")
-  [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
+  # Save previous log and initialize fresh log for this plan session
+  if [ -f "$LOG_FILE" ]; then
+    cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
+  fi
+  echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
+  echo "Action: plan | Model: $PLAN_MODEL" >> "$LOG_FILE"
+  echo "" >> "$LOG_FILE"
 
-  RALPH_MODEL="$PLAN_MODEL" exec bash "$LOOP_SH" "${LOOP_ARGS[@]}"
+  PLAN_ITERATION=0
+  PLAN_TEMP_OUTPUT=$(mktemp)
+  trap 'rm -f "$PLAN_TEMP_OUTPUT"' EXIT
+
+  while true; do
+    PLAN_ITERATION=$((PLAN_ITERATION + 1))
+
+    # Check for stop signal
+    if [ -f "$STATUS_FILE" ] && grep -qiE 'BREAK|INTERRUPT|STOP' "$STATUS_FILE" 2>/dev/null; then
+      echo "Stop signal detected — exiting plan mode"
+      echo "=== Plan stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+      exit 0
+    fi
+
+    # Check iteration limit
+    if [ "$PLAN_ITERATION" -gt "$MAX_PLAN_ITERATIONS" ]; then
+      echo "Plan mode reached iteration limit ($MAX_PLAN_ITERATIONS)"
+      exit 0
+    fi
+
+    echo "Plan iteration $PLAN_ITERATION / $MAX_PLAN_ITERATIONS"
+
+    # Snapshot plan file mtime before calling Claude (cross-platform)
+    PLAN_MTIME_BEFORE=""
+    if [ -f "$PLAN_FILE" ]; then
+      PLAN_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    fi
+
+    # Run ralph.sh for one plan iteration (limit=1 enforces single-call contract)
+    LOOP_ARGS=("plan" "1" "--model" "$PLAN_MODEL")
+    [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
+
+    set +e
+    RALPH_MODEL="$PLAN_MODEL" bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE" | tee "$PLAN_TEMP_OUTPUT"
+    PLAN_EXIT_CODE=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$PLAN_EXIT_CODE" -ne 0 ]; then
+      error_type=$(classify_error "$PLAN_TEMP_OUTPUT")
+      echo "Plan iteration $PLAN_ITERATION failed (exit $PLAN_EXIT_CODE, error: $error_type)"
+      case "$error_type" in
+        USAGE_EXHAUSTED)
+          check_all_agent_capacity || true
+          PLAN_ITERATION=$((PLAN_ITERATION - 1))
+          continue
+          ;;
+        RATE_LIMIT)
+          handle_rate_limit || true
+          PLAN_ITERATION=$((PLAN_ITERATION - 1))
+          continue
+          ;;
+        OVERLOADED)
+          handle_overloaded || true
+          PLAN_ITERATION=$((PLAN_ITERATION - 1))
+          continue
+          ;;
+        AUTH_FAILURE)
+          echo "Authentication failure — cannot continue."
+          exit 1
+          ;;
+        *)
+          echo "Plan mode error — propagating exit code."
+          exit $PLAN_EXIT_CODE
+          ;;
+      esac
+    fi
+
+    # Check if IMPLEMENTATION_PLAN.md was modified (semantic done check)
+    PLAN_MTIME_AFTER=""
+    if [ -f "$PLAN_FILE" ]; then
+      PLAN_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$PLAN_MTIME_BEFORE" ] && [ "$PLAN_MTIME_BEFORE" = "$PLAN_MTIME_AFTER" ]; then
+      echo "Planning complete — IMPLEMENTATION_PLAN.md unchanged after iteration $PLAN_ITERATION"
+      exit 0
+    fi
+
+    echo "Plan iteration $PLAN_ITERATION complete"
+    echo ""
+  done
+
+  rm -f "$PLAN_TEMP_OUTPUT"
+  exit 0
 fi
 
 # Decompose action: one-shot opus analysis to split complex tasks
@@ -399,9 +486,28 @@ if [ "$ACTION" = "decompose" ]; then
   echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
   echo "Mode: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
+
+  # Snapshot plan file mtime before decompose call (cross-platform)
+  DECOMPOSE_MTIME_BEFORE=""
+  if [ -f "$PLAN_FILE" ]; then
+    DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+  fi
+
   cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
   DECOMPOSE_EXIT=${PIPESTATUS[0]}
   echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+
+  # Post-call verification: warn if IMPLEMENTATION_PLAN.md was not modified
+  if [ "$DECOMPOSE_EXIT" -eq 0 ]; then
+    DECOMPOSE_MTIME_AFTER=""
+    if [ -f "$PLAN_FILE" ]; then
+      DECOMPOSE_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    fi
+    if [ -n "$DECOMPOSE_MTIME_BEFORE" ] && [ "$DECOMPOSE_MTIME_BEFORE" = "$DECOMPOSE_MTIME_AFTER" ]; then
+      echo "Warning: IMPLEMENTATION_PLAN.md was not modified by decompose"
+    fi
+  fi
+
   exit $DECOMPOSE_EXIT
 fi
 
