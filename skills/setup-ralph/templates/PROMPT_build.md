@@ -40,8 +40,9 @@ Select the most important task from the implementation plan, implement it correc
 0d. Reference: src/* (use parallel Sonnet subagents for code reading)
 
 1. Select Task
-   - Pick the most important uncompleted task from IMPLEMENTATION_PLAN.md
-   - Most important = most foundational or highest priority
+   - Read @NEXT-TASK.md — this is the task to implement this iteration
+   - If NEXT-TASK.md does not exist, use the first uncompleted task (`- [ ]`)
+     in IMPLEMENTATION_PLAN.md in document order
    - Only ONE task per iteration
 
 2. Investigate Before Implementing

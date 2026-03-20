@@ -420,6 +420,7 @@ TEMP_OUTPUT=$(mktemp)
 orchestrator_cleanup() {
   rm -f "$STUCK_FILE"
   rm -f "$TEMP_OUTPUT"
+  rm -f "NEXT-TASK.md"
   cleanup_error_handler
 }
 trap orchestrator_cleanup EXIT
@@ -506,9 +507,13 @@ while true; do
   echo "STUCK_COUNT=$STUCK_COUNT" >> "$STUCK_FILE"
   echo "CURRENT_MODEL_TIER=$CURRENT_MODEL_TIER" >> "$STUCK_FILE"
 
+  # Communicate selected task to Claude via NEXT-TASK.md
+  echo "$clean_task" > "NEXT-TASK.md"
+
   echo "---"
   echo "Orchestrator iteration $ITERATION"
   echo "Task:  $clean_task"
+  echo "Task: $clean_task" >> "$LOG_FILE"
   echo "Model: $selected_model$escalated"
   echo "Stuck: $STUCK_COUNT/$MAX_STUCK"
   echo "---"

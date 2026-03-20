@@ -436,9 +436,10 @@ cleanup() {
     generate_report "$exit_reason" "$exit_code"
   fi
 
-  # Clean up stuck tracker (skip in orchestrated mode — orchestrator owns the lifecycle)
-  if [ "$RALPH_ORCHESTRATED" != "true" ]; then
+  # Clean up stuck tracker and NEXT-TASK.md (skip in orchestrated mode)
+  if [ "${RALPH_ORCHESTRATED:-}" != "true" ]; then
     rm -f "$STUCK_FILE"
+    rm -f "NEXT-TASK.md"
   fi
 
   echo "============================================"
@@ -554,6 +555,12 @@ while true; do
     if is_stuck; then
       skip_stuck_task "$current_task"
       continue  # Try next iteration with new task
+    fi
+
+    # In standalone mode, communicate selected task to Claude via NEXT-TASK.md
+    # (In orchestrated mode, orchestrator already wrote NEXT-TASK.md)
+    if [ "${RALPH_ORCHESTRATED:-}" != "true" ]; then
+      echo "$current_task" > "NEXT-TASK.md"
     fi
 
     echo "Current task: $current_task"
