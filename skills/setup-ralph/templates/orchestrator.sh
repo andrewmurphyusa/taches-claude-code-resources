@@ -78,6 +78,7 @@ fi
 PLAN_FILE="IMPLEMENTATION_PLAN.md"
 STATUS_FILE="RALPH_STATUS.txt"
 LOG_FILE="ralph.log"
+ACCUMULATED_LOG_FILE="${RALPH_ACCUMULATED_LOG:-ralph.accumulated.log}"
 ROUTING_ENABLED=true        # Set to false to pass through to ralph.sh without routing
 FORCED_MODEL=""             # If set, overrides routing for all tasks
 
@@ -391,8 +392,17 @@ if [ "$ACTION" = "decompose" ]; then
   CLAUDE_ARGS=("--model" "$DECOMPOSE_MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
   [ -n "$VERBOSE" ] && CLAUDE_ARGS+=("--verbose")
 
-  cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1
-  exit $?
+  # Save previous log and initialize fresh log for this decompose session
+  if [ -f "$LOG_FILE" ]; then
+    cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
+  fi
+  echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
+  echo "Mode: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
+  echo "" >> "$LOG_FILE"
+  cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
+  DECOMPOSE_EXIT=${PIPESTATUS[0]}
+  echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+  exit $DECOMPOSE_EXIT
 fi
 
 # Build action: iterate with per-task model routing
