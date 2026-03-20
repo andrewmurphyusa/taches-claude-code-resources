@@ -34,3 +34,7 @@ REPORT.accumulated.md
 # Capacity monitoring cache and state files (defensive — never commit)
 /tmp/ralph-usage-cache.json
 .ralph_capacity_*
+
+# prompts for making changes to anything here
+prompts/**
+prompts/
