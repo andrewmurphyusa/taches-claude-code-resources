@@ -90,6 +90,8 @@ ACTION="build"
 LIMIT=""
 VERBOSE=""
 PASSTHROUGH_ARGS=()
+STOP_AFTER_TIME=""   # HH:MM
+STOP_AFTER_DATE=""   # YYYY-MM-DD
 
 # Capacity threshold overrides (applied via env vars before sourcing capacity-monitor.sh)
 OVERRIDE_5HR_WARN_THRESHOLD=""
@@ -264,6 +266,38 @@ while [[ $# -gt 0 ]]; do
       fi
       shift
       ;;
+    --stop-after-time)
+      STOP_AFTER_TIME="$2"
+      if [ -z "${STOP_AFTER_TIME:-}" ] || ! [[ "$STOP_AFTER_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+        echo "Error: --stop-after-time requires HH:MM (24h format)"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --stop-after-time=*)
+      STOP_AFTER_TIME="${1#*=}"
+      if ! [[ "$STOP_AFTER_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+        echo "Error: --stop-after-time requires HH:MM (24h format)"
+        exit 1
+      fi
+      shift
+      ;;
+    --stop-after-date)
+      STOP_AFTER_DATE="$2"
+      if [ -z "${STOP_AFTER_DATE:-}" ] || ! [[ "$STOP_AFTER_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        echo "Error: --stop-after-date requires YYYY-MM-DD"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --stop-after-date=*)
+      STOP_AFTER_DATE="${1#*=}"
+      if ! [[ "$STOP_AFTER_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        echo "Error: --stop-after-date requires YYYY-MM-DD"
+        exit 1
+      fi
+      shift
+      ;;
     --help|-h)
       print_help
       exit 0
@@ -275,6 +309,66 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+STOP_EPOCH=""
+
+# Compute the Unix epoch for the requested stop time.
+# Sets global STOP_EPOCH. Called once after argument parsing.
+compute_stop_epoch() {
+  local stop_date="$1"   # YYYY-MM-DD or ""
+  local stop_time="$2"   # HH:MM or ""
+  local is_mac=false
+  [[ "$OSTYPE" == "darwin"* ]] && is_mac=true
+
+  if [ -n "$stop_date" ] && [ -n "$stop_time" ]; then
+    # Both date and time given
+    if $is_mac; then
+      STOP_EPOCH=$(date -j -f "%Y-%m-%d %H:%M" "$stop_date $stop_time" +%s)
+    else
+      STOP_EPOCH=$(date -d "$stop_date $stop_time" +%s)
+    fi
+
+  elif [ -n "$stop_date" ]; then
+    # Date only → stop at midnight (00:00) of that date
+    if $is_mac; then
+      STOP_EPOCH=$(date -j -f "%Y-%m-%d" "$stop_date" +%s)
+    else
+      STOP_EPOCH=$(date -d "$stop_date" +%s)
+    fi
+
+  elif [ -n "$stop_time" ]; then
+    # Time only → next occurrence (today if still future, else tomorrow)
+    local candidate
+    if $is_mac; then
+      candidate=$(date -j -f "%H:%M" "$stop_time" +%s)
+    else
+      candidate=$(date -d "$stop_time" +%s)
+    fi
+    local now
+    now=$(date +%s)
+    if [ "$candidate" -gt "$now" ]; then
+      STOP_EPOCH="$candidate"
+    else
+      # Use tomorrow
+      if $is_mac; then
+        STOP_EPOCH=$(date -j -v+1d -f "%H:%M" "$stop_time" +%s)
+      else
+        STOP_EPOCH=$(date -d "tomorrow $stop_time" +%s)
+      fi
+    fi
+  fi
+}
+
+# Compute stop epoch once (no-op if neither flag given)
+if [ -n "$STOP_AFTER_TIME" ] || [ -n "$STOP_AFTER_DATE" ]; then
+  compute_stop_epoch "$STOP_AFTER_DATE" "$STOP_AFTER_TIME"
+  # Display computed stop time (platform-branched for human-readable epoch)
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "Stopping at: $(date -r "$STOP_EPOCH" '+%Y-%m-%d %H:%M:%S')"
+  else
+    echo "Stopping at: $(date -d "@$STOP_EPOCH" '+%Y-%m-%d %H:%M:%S')"
+  fi
+fi
 
 # ============================================================================
 # CAPACITY MONITOR (source after arg parsing so CLI overrides apply)
@@ -550,6 +644,14 @@ while true; do
   if [ -n "$LIMIT" ] && [ "$ITERATION" -gt "$LIMIT" ]; then
     echo ""
     echo "Reached iteration limit ($LIMIT)"
+    exit 0
+  fi
+
+  # Check wall-clock stop time
+  if [ -n "${STOP_EPOCH:-}" ] && [ "$(date +%s)" -ge "$STOP_EPOCH" ]; then
+    echo ""
+    echo "Wall-clock stop time reached ($(date '+%Y-%m-%d %H:%M:%S'))"
+    echo "=== Orchestrator stopped via --stop-after $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
     exit 0
   fi
 
