@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Per-hostname multi-engine gate for Ralph Orchestrator.",
+    "Copy this file to engines-config.json (remove the .example suffix) to enable.",
+    "",
+    "How it works:",
+    "  On startup, orchestrator.sh reads this file and looks up the current machine's",
+    "  hostname (from `hostname` command). If found under 'hosts', that machine's",
+    "  settings override the RALPH_MULTI_ENGINE env var. If not found, 'default' is used.",
+    "  If this file is absent, RALPH_MULTI_ENGINE defaults to false (Claude-only mode).",
+    "",
+    "Authentication requirements when RALPH_MULTI_ENGINE=true:",
+    "  - Codex: run `codex login` to authenticate with your OpenAI account.",
+    "           Config stored in ~/.codex/config.toml",
+    "  - Gemini: run `gemini login` (or use GEMINI_API_KEY env var) for Google auth.",
+    "           Assumes headed environment (browser-based OAuth).",
+    "  - Claude: existing ~/.claude/.credentials.json used as before.",
+    "",
+    "Removing this comment block: the '_comment' key is ignored by the loader."
+  ],
+  "default": {
+    "RALPH_MULTI_ENGINE": false
+  },
+  "hosts": {
+    "my-codex-machine": {
+      "RALPH_MULTI_ENGINE": true
+    },
+    "dev-workstation": {
+      "RALPH_MULTI_ENGINE": true
+    },
+    "ci-runner": {
+      "RALPH_MULTI_ENGINE": false
+    }
+  }
+}

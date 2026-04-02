@@ -11,8 +11,10 @@
 #   LOG_FILE    — set in orchestrator.sh before this file is sourced
 #   STATUS_FILE — set in orchestrator.sh before this file is sourced
 #
-# Agent extensibility: set RALPH_CAPACITY_AGENTS="claude gemini" and drop a
-# capacity-gemini.sh alongside this file. No other changes required.
+# Agent extensibility: set RALPH_CAPACITY_AGENTS="claude codex gemini" and drop a
+# capacity-{engine}.sh alongside this file. No other changes required.
+# Default is "claude" for backward compat; set RALPH_CAPACITY_AGENTS in env or
+# export it in orchestrator.sh startup to enable multi-engine capacity monitoring.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -202,6 +204,30 @@ _check_weekly_capacity() {
       echo "[CAPACITY] $agent weekly=${fresh_pct}% — work-week pause, checking again in 30s" >> "$LOG_FILE"
     done
   fi
+}
+
+# _compute_min_reset_epoch
+# Iterates all CAPACITY_AGENTS, fetches their capacity, and returns the minimum
+# non-(-1) 5h reset epoch among agents whose CAPACITY_5H_REMAINING_PCT is 0.
+# Prints the epoch to stdout; prints -1 if no agent is exhausted or all epochs unknown.
+# Used by the all-engines-exhausted sleep path in orchestrator.sh.
+_compute_min_reset_epoch() {
+  local min_epoch=-1
+  local agent_pct agent_epoch
+
+  for _agent in $CAPACITY_AGENTS; do
+    if fetch_${_agent}_capacity 2>/dev/null; then
+      agent_pct=$CAPACITY_5H_REMAINING_PCT
+      agent_epoch=$CAPACITY_5H_RESET_EPOCH
+      if [ "${agent_pct:-100}" -le 0 ] 2>/dev/null && [ "${agent_epoch:-0}" -gt 0 ] 2>/dev/null; then
+        if [ "$min_epoch" -eq -1 ] || [ "$agent_epoch" -lt "$min_epoch" ]; then
+          min_epoch=$agent_epoch
+        fi
+      fi
+    fi
+  done
+
+  echo "$min_epoch"
 }
 
 # ============================================================================

@@ -20,7 +20,21 @@ OVERLOADED_RETRY=0
 
 # classify_error <file_path>
 # Greps captured output for known error patterns (priority order).
+# Handles error output from Claude, Codex (OpenAI), and Gemini (Antigravity) CLIs.
 # Echoes the first match; returns UNKNOWN if no pattern matches.
+#
+# Codex error patterns (from github.com/openai/codex issues):
+#   USAGE_EXHAUSTED: "5-hour window" | "Codex requests for the 5-hour" | "weekly Codex limit"
+#   RATE_LIMIT:      "rate_limit_exceeded" | "Rate limit reached for .* in organization"
+#                    | "please slow down and try again after"
+#
+# Gemini/Antigravity error patterns (from Gemini API docs and community reports):
+#   USAGE_EXHAUSTED: "TerminalQuotaError" | "daily quota" | "RESOURCE_EXHAUSTED"
+#   RATE_LIMIT:      "Rate Limit Exceeded" | "Quota exceeded for quota metric"
+#                    | "RATE_LIMIT_EXCEEDED"
+#
+# NOTE: All three CLIs (claude, codex, gemini) exit with code 1 for all error types.
+# String matching on combined stdout+stderr is the only reliable classification method.
 classify_error() {
   local output_file="$1"
 
@@ -30,15 +44,21 @@ classify_error() {
   fi
 
   # Priority order: most specific first
-  if grep -qi "usage limit\|5-hour window" "$output_file" 2>/dev/null; then
+
+  # Usage exhaustion — Claude, Codex, Gemini
+  if grep -qi "usage limit\|5-hour window\|Codex requests for the 5-hour\|weekly Codex limit\|TerminalQuotaError\|daily quota\|RESOURCE_EXHAUSTED" "$output_file" 2>/dev/null; then
     echo "USAGE_EXHAUSTED"
-  elif grep -qi "rate_limit_error\|429" "$output_file" 2>/dev/null; then
+  # Rate limit — Claude, Codex, Gemini
+  elif grep -qi "rate_limit_error\|rate_limit_exceeded\|Rate limit reached for\|please slow down and try again after\|Rate Limit Exceeded\|Quota exceeded for quota metric\|RATE_LIMIT_EXCEEDED\|429" "$output_file" 2>/dev/null; then
     echo "RATE_LIMIT"
+  # Overloaded — Claude-specific
   elif grep -qi "overloaded_error" "$output_file" 2>/dev/null; then
     echo "OVERLOADED"
-  elif grep -qi "authentication_error" "$output_file" 2>/dev/null; then
+  # Authentication failure — Claude, Codex, Gemini
+  elif grep -qi "authentication_error\|Unauthorized\|Invalid API key\|API key not found\|auth.*failed\|login required" "$output_file" 2>/dev/null; then
     echo "AUTH_FAILURE"
-  elif grep -qi "context_length_exceeded" "$output_file" 2>/dev/null; then
+  # Context too long — Claude, Codex, Gemini
+  elif grep -qi "context_length_exceeded\|maximum context length\|too many tokens\|context window" "$output_file" 2>/dev/null; then
     echo "CONTEXT_TOO_LONG"
   else
     echo "UNKNOWN"
