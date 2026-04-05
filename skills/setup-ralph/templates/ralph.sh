@@ -81,16 +81,11 @@ fi
 
 # Parse arguments
 MODE="build"
-LIMIT=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     plan)
       MODE="plan"
-      shift
-      ;;
-    [0-9]*)
-      LIMIT=$1
       shift
       ;;
     --verbose)
@@ -103,13 +98,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 [plan] [limit] [--verbose] [--model opus|sonnet|haiku]"
+      echo "Usage: $0 [plan] [--verbose] [--model opus|sonnet|haiku]"
       echo ""
       echo "Examples:"
-      echo "  $0              # Build mode, unlimited (exits when all tasks done)"
-      echo "  $0 20           # Build mode, max 20 iterations"
-      echo "  $0 plan         # Plan mode, exits when plan is complete"
-      echo "  $0 plan 5       # Plan mode, max 5 iterations"
+      echo "  $0              # Build mode, one execution pass"
+      echo "  $0 plan         # Plan mode, one planning pass"
       echo "  $0 --verbose    # Enable verbose logging"
       echo "  $0 --model sonnet  # Use Sonnet instead of Opus"
       echo "  $0 --model haiku   # Use Haiku for simple tasks"
@@ -180,7 +173,7 @@ push_to_backup() {
     return 0
   fi
 
-  # Push to remote (suppress errors, don't fail the loop)
+  # Push to remote (suppress errors, don't fail the run)
   if git push origin HEAD 2>/dev/null; then
     echo "📤 Pushed to remote backup"
   else
@@ -247,13 +240,13 @@ else
 fi
 
 # ============================================================================
-# ITERATION SUMMARY
+# EXECUTION SUMMARY
 # ============================================================================
 
-print_iteration_summary() {
-  local iteration_start="$1"
-  local iteration_end=$(date +%s)
-  local duration=$((iteration_end - iteration_start))
+print_execution_summary() {
+  local execution_start="$1"
+  local execution_end=$(date +%s)
+  local duration=$((execution_end - execution_start))
   local mins=$((duration / 60))
   local secs=$((duration % 60))
 
@@ -261,9 +254,9 @@ print_iteration_summary() {
   local last_commit=$(git log -1 --format="%h %s" 2>/dev/null || echo "")
   local last_commit_time=$(git log -1 --format="%ct" 2>/dev/null || echo "0")
 
-  # Check if commit was made during this iteration
+  # Check if commit was made during this execution
   local commit_msg=""
-  if [ "$last_commit_time" -ge "$iteration_start" ]; then
+  if [ "$last_commit_time" -ge "$execution_start" ]; then
     commit_msg="$last_commit"
   fi
 
@@ -289,7 +282,7 @@ print_iteration_summary() {
   fi
 
   echo ""
-  echo "━━━ Iteration $ITERATION Complete (${mins}m ${secs}s) ━━━"
+  echo "━━━ Execution Complete (${mins}m ${secs}s) ━━━"
 
   if [ -n "$commit_msg" ]; then
     echo "✅ Commit: $commit_msg"
@@ -313,7 +306,7 @@ print_iteration_summary() {
       fi
     fi
   else
-    echo "⚠️  No commit this iteration"
+    echo "⚠️  No commit this execution"
   fi
 
   echo "📊 Progress: $completed/$total_tasks tasks ($pct%)"
@@ -355,7 +348,6 @@ Generated: $(date '+%Y-%m-%d %H:%M:%S')
 | Metric | Value |
 |--------|-------|
 | Duration | ${minutes}m ${seconds}s |
-| Iterations | $ITERATION |
 | Tasks Completed | $completed / $total |
 | Tasks Skipped | $skipped |
 | Tasks Remaining | $remaining |
@@ -370,14 +362,8 @@ EOF
     "complete")
       echo "All tasks completed successfully." >> "$REPORT_FILE"
       ;;
-    "limit")
-      echo "Reached iteration limit ($LIMIT)." >> "$REPORT_FILE"
-      ;;
     "interrupted")
       echo "Manually interrupted (Ctrl+C)." >> "$REPORT_FILE"
-      ;;
-    "status_file")
-      echo "Stopped via RALPH_STATUS.txt signal." >> "$REPORT_FILE"
       ;;
     "error")
       echo "Exited due to error (code $2)." >> "$REPORT_FILE"
@@ -449,7 +435,7 @@ trap 'cleanup "interrupted"; exit 130' INT
 trap 'cleanup "error" "$?"; exit $?' ERR
 
 # ============================================================================
-# MAIN LOOP
+# MAIN EXECUTION
 # ============================================================================
 
 # Select prompt file based on mode
@@ -489,11 +475,6 @@ fi
 echo "Model: $MODEL"
 echo "Claude args: ${CLAUDE_ARGS[*]}"
 echo "Prompt: $PROMPT_FILE"
-if [ -n "$LIMIT" ]; then
-  echo "Limit: $LIMIT iterations"
-else
-  echo "Limit: until complete (Ctrl+C to stop)"
-fi
 echo "Stuck threshold: $MAX_STUCK failures"
 echo "Log file: $LOG_FILE (tail -f to watch)"
 echo ""
@@ -501,98 +482,73 @@ echo ""
 # Setup remote backup (creates private GitHub repo if needed)
 setup_remote_backup
 echo ""
-echo "Starting loop..."
+echo "Starting..."
 echo "---"
 echo ""
 
-# Save previous log file contents into Accumulate log file so that we don't lose previous logs
+# Save previous log file contents into Accumulate log file so that we don’t lose previous logs
 if [ -f "$LOG_FILE" ] ; then
   cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
 fi
 
 # Initialize log file
-echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
+echo "=== Ralph Session Started $(date ‘+%Y-%m-%d %H:%M:%S’) ===" > "$LOG_FILE"
 echo "Mode: $MODE | Model: $MODEL" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
 
-# Run the loop
-ITERATION=0
-while true; do
-  ITERATION=$((ITERATION + 1))
+# Check Claude capacity before running (may sleep if thresholds hit).
+# Safe even if capacity-monitor.sh wasn’t sourced (function will be missing).
+if command -v check_all_agent_capacity >/dev/null 2>&1; then
+  check_all_agent_capacity || true
+fi
 
-  # Check for stop signal
-  if [ -f "$STATUS_FILE" ] && grep -qiE 'BREAK|INTERRUPT|STOP' "$STATUS_FILE" 2>/dev/null; then
+EXECUTION_START=$(date +%s)
+echo "📍 Starting - $(date ‘+%Y-%m-%d %H:%M:%S’)"
+
+# BUILD MODE: Check completion and select task
+if [ "$MODE" = "build" ]; then
+  if check_all_tasks_complete; then
     echo ""
-    echo "Stop signal detected in $STATUS_FILE: $(cat "$STATUS_FILE")"
-    echo "=== Ralph stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
-    cleanup "status_file"
+    echo "ALL TASKS COMPLETE"
+    cleanup "complete"
     exit 0
   fi
 
-  # Check Claude capacity before each iteration (may sleep if thresholds hit).
-  # Safe even if capacity-monitor.sh wasn’t sourced (function will be missing).
-  if command -v check_all_agent_capacity >/dev/null 2>&1; then
-    check_all_agent_capacity || true
+  # Get current task for stuck detection
+  current_task=$(get_current_task)
+  update_stuck_tracker "$current_task"
+
+  # Check if stuck; skip and exit so orchestrator can select a fresh task
+  if is_stuck; then
+    skip_stuck_task "$current_task"
+    cleanup "complete"
+    exit 0
   fi
 
-  ITERATION_START=$(date +%s)
-  echo "📍 Iteration $ITERATION - $(date '+%Y-%m-%d %H:%M:%S')"
+  # In standalone mode, communicate selected task to Claude via NEXT-TASK.md
+  # (In orchestrated mode, orchestrator already wrote NEXT-TASK.md)
+  if [ "${RALPH_ORCHESTRATED:-}" != "true" ]; then
+    echo "$current_task" > "NEXT-TASK.md"
+  fi
 
-  # BUILD MODE: Check completion before each iteration
+  echo "Current task: $current_task"
+fi
+
+# Run Claude with prompt (tee to log file for observability)
+# Watch progress: tail -f ralph.log
+if cat "$PROMPT_FILE" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; then
   if [ "$MODE" = "build" ]; then
-    if check_all_tasks_complete; then
-      echo ""
-      echo "ALL TASKS COMPLETE"
-      cleanup "complete"
-      exit 0
-    fi
-
-    # Get current task for stuck detection
-    current_task=$(get_current_task)
-    update_stuck_tracker "$current_task"
-
-    # Check if stuck
-    if is_stuck; then
-      skip_stuck_task "$current_task"
-      continue  # Try next iteration with new task
-    fi
-
-    # In standalone mode, communicate selected task to Claude via NEXT-TASK.md
-    # (In orchestrated mode, orchestrator already wrote NEXT-TASK.md)
-    if [ "${RALPH_ORCHESTRATED:-}" != "true" ]; then
-      echo "$current_task" > "NEXT-TASK.md"
-    fi
-
-    echo "Current task: $current_task"
-  fi
-
-  # Check iteration limit
-  if [ -n "$LIMIT" ] && [ "$ITERATION" -gt "$LIMIT" ]; then
-    echo ""
-    echo "Reached iteration limit ($LIMIT)"
-    cleanup "limit"
-    exit 0
-  fi
-
-  # Run Claude with prompt (tee to log file for observability)
-  # Watch progress: tail -f ralph.log
-  if cat "$PROMPT_FILE" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; then
-    # Print iteration summary in build mode
-    if [ "$MODE" = "build" ]; then
-      print_iteration_summary "$ITERATION_START"
-      # Push to remote backup after each successful iteration
-      push_to_backup
-    else
-      echo "✓ Iteration $ITERATION complete"
-    fi
+    print_execution_summary "$EXECUTION_START"
+    push_to_backup
   else
-    EXIT_CODE=$?
-    echo ""
-    echo "❌ Claude exited with code $EXIT_CODE"
-    cleanup "error" "$EXIT_CODE"
-    exit $EXIT_CODE
+    echo "✓ Execution complete"
   fi
-
+else
+  EXIT_CODE=$?
   echo ""
+  echo "❌ Claude exited with code $EXIT_CODE"
+  cleanup "error" "$EXIT_CODE"
+  exit $EXIT_CODE
+fi
 
-done
+cleanup "complete"

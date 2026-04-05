@@ -558,8 +558,8 @@ if [ "$STAGE" = "plan" ]; then
       PLAN_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
     fi
 
-    # Run ralph.sh for one plan iteration (limit=1 enforces single-call contract)
-    LOOP_ARGS=("plan" "1" "--model" "$PLAN_MODEL")
+    # Run ralph.sh for one plan pass (ralph.sh is single-pass by design)
+    LOOP_ARGS=("plan" "--model" "$PLAN_MODEL")
     [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
 
     set +e
@@ -688,9 +688,9 @@ invoke_engine() {
 
   case "$engine" in
     claude)
-      # Delegate to ralph.sh — existing path unchanged
+      # Delegate to ralph.sh for one build pass (ralph.sh is single-pass by design)
       export RALPH_MODEL="$model"
-      local loop_args=("1" "--model" "$model")
+      local loop_args=("--model" "$model")
       [ -n "$VERBOSE" ] && loop_args+=("$VERBOSE")
       bash "$LOOP_SH" "${loop_args[@]}" 2>&1 | tee "$TEMP_OUTPUT"
       INVOKE_EXIT_CODE=${PIPESTATUS[0]}
