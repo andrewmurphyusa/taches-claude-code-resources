@@ -34,10 +34,11 @@ Select the most important task from the implementation plan, implement it correc
 
 ## Process
 
-0a. Study specs/* (use up to 500 parallel Sonnet subagents)
-0b. Study @IMPLEMENTATION_PLAN.md
-0c. Study @AGENTS.md (if exists)
-0d. Reference: src/* (use parallel Sonnet subagents for code reading)
+0. Study existing artifacts
+   - a. Study specs/* (use up to 500 parallel Sonnet subagents)
+   - b. Study @IMPLEMENTATION_PLAN.md
+   - c. Study @AGENTS.md (if exists)
+   - d. Reference: src/* (use parallel Sonnet subagents for code reading)
 
 1. Select Task
    - Read @NEXT-TASK.md — this is the task to implement this iteration
