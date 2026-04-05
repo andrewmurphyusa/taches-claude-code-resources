@@ -101,6 +101,62 @@ except Exception as e:
 }
 load_engine_config
 
+# ============================================================================
+# PER-ENGINE TOKEN LOADING
+# ============================================================================
+
+# load_engine_token <engine>
+# Loads the OAuth/API token for the given engine from its dedicated token file.
+# Token file defaults (override via RALPH_TOKEN_FILE_<ENGINE> env var):
+#   claude  -> ~/.claude-oauth-token  -> CLAUDE_CODE_OAUTH_TOKEN
+#   codex   -> ~/.codex-api-token     -> OPENAI_API_KEY
+#   gemini  -> ~/.gemini-api-token    -> GEMINI_API_KEY
+# Skips silently if the corresponding env var is already set.
+load_engine_token() {
+  local engine="$1"
+  local token_file token_env
+
+  case "$engine" in
+    claude)
+      token_file="${RALPH_TOKEN_FILE_CLAUDE:-$HOME/.claude-oauth-token}"
+      token_env="CLAUDE_CODE_OAUTH_TOKEN"
+      ;;
+    codex)
+      token_file="${RALPH_TOKEN_FILE_CODEX:-$HOME/.codex-api-token}"
+      token_env="OPENAI_API_KEY"
+      ;;
+    gemini)
+      token_file="${RALPH_TOKEN_FILE_GEMINI:-$HOME/.gemini-api-token}"
+      token_env="GEMINI_API_KEY"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  # Skip if already set
+  local current_val="${!token_env:-}"
+  if [ -n "$current_val" ]; then
+    return 0
+  fi
+
+  if [ -f "$token_file" ]; then
+    # Security: warn on insecure permissions (should be 600 or more restrictive)
+    local perms
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      perms=$(stat -f %Lp "$token_file" 2>/dev/null)
+    else
+      perms=$(stat -c %a "$token_file" 2>/dev/null)
+    fi
+    if [ -n "$perms" ] && [ "$((perms % 100))" -ne 0 ]; then
+      echo "⚠️  Security warning: $token_file has insecure permissions ($perms)"
+      echo "   Run: chmod 600 $token_file"
+    fi
+    export "$token_env"="$(cat "$token_file")"
+    echo "Loaded $engine token: $token_file -> \$$token_env"
+  fi
+}
+
 # Locate ralph.sh: env var override, or local fork in project root
 LOOP_SH="${RALPH_LOOP_SH:-$ORCHESTRATOR_DIR/ralph.sh}"
 
@@ -203,6 +259,9 @@ print_help() {
   echo "  RALPH_CAPACITY_AGENTS           Space-separated capacity agent list (auto-set from RALPH_MULTI_ENGINE)"
   echo "  RALPH_PLAN_MAX_ITERATIONS       Max plan iterations before stopping (default: 5)"
   echo "  RALPH_DECOMPOSE_MAX_ITERATIONS  Max decompose iterations before stopping (default: 5)"
+  echo "  RALPH_TOKEN_FILE_CLAUDE         Claude token file (default: ~/.claude-oauth-token -> CLAUDE_CODE_OAUTH_TOKEN)"
+  echo "  RALPH_TOKEN_FILE_CODEX          Codex token file (default: ~/.codex-api-token -> OPENAI_API_KEY)"
+  echo "  RALPH_TOKEN_FILE_GEMINI         Gemini token file (default: ~/.gemini-api-token -> GEMINI_API_KEY)"
   echo ""
   echo "Examples:"
   echo "  $0                   # Build with auto model selection"
@@ -748,6 +807,9 @@ invoke_engine() {
   local engine="$1"
   local model="$2"
   local prompt_file="$3"
+
+  # Load per-engine OAuth/API token before dispatch
+  load_engine_token "$engine"
 
   case "$engine" in
     claude)
