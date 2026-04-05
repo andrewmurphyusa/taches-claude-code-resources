@@ -5,7 +5,7 @@
 # Usage:
 #   ./orchestrator.sh              # Build stage, auto-select model per task
 #   ./orchestrator.sh plan         # Plan stage (uses opus)
-#   ./orchestrator.sh decompose   # Decompose complex tasks (uses opus, one-shot)
+#   ./orchestrator.sh decompose   # Decompose complex tasks (iterative, uses opus)
 #   ./orchestrator.sh 10           # Build stage, max 10 iterations
 #   ./orchestrator.sh --model opus # Force a specific model (disables routing)
 #   ./orchestrator.sh --help       # Show usage
@@ -192,15 +192,17 @@ print_help() {
   echo "  Per-hostname config: auth/engines-config.json (see engines-config.json.example)"
   echo ""
   echo "Environment Variables:"
-  echo "  RALPH_MODEL             Default model if routing disabled (default: opus)"
-  echo "  RALPH_LOOP_SH           Path to ralph.sh (default: ./ralph.sh)"
-  echo "  RALPH_MAX_STUCK         Max failures before skipping task (default: 3)"
-  echo "  RALPH_VERBOSE           Enable verbose mode (true/false)"
-  echo "  RALPH_BACKUP            Enable remote backup (true/false, default: true)"
-  echo "  RALPH_ORCHESTRATED      Set by orchestrator — ralph.sh skips stuck file cleanup"
-  echo "  RALPH_MULTI_ENGINE      Enable multi-engine routing (true/false, default: false)"
-  echo "  RALPH_ENGINES           Space-separated engine list (default: claude codex gemini)"
-  echo "  RALPH_CAPACITY_AGENTS   Space-separated capacity agent list (auto-set from RALPH_MULTI_ENGINE)"
+  echo "  RALPH_MODEL                     Default model if routing disabled (default: opus)"
+  echo "  RALPH_LOOP_SH                   Path to ralph.sh (default: ./ralph.sh)"
+  echo "  RALPH_MAX_STUCK                 Max failures before skipping task (default: 3)"
+  echo "  RALPH_VERBOSE                   Enable verbose mode (true/false)"
+  echo "  RALPH_BACKUP                    Enable remote backup (true/false, default: true)"
+  echo "  RALPH_ORCHESTRATED              Set by orchestrator — ralph.sh skips stuck file cleanup"
+  echo "  RALPH_MULTI_ENGINE              Enable multi-engine routing (true/false, default: false)"
+  echo "  RALPH_ENGINES                   Space-separated engine list (default: claude codex gemini)"
+  echo "  RALPH_CAPACITY_AGENTS           Space-separated capacity agent list (auto-set from RALPH_MULTI_ENGINE)"
+  echo "  RALPH_PLAN_MAX_ITERATIONS       Max plan iterations before stopping (default: 5)"
+  echo "  RALPH_DECOMPOSE_MAX_ITERATIONS  Max decompose iterations before stopping (default: 5)"
   echo ""
   echo "Examples:"
   echo "  $0                   # Build with auto model selection"
@@ -616,10 +618,11 @@ if [ "$STAGE" = "plan" ]; then
   exit 0
 fi
 
-# Decompose stage: one-shot opus analysis to split complex tasks
+# Decompose stage: iterative opus analysis to split complex tasks
 if [ "$STAGE" = "decompose" ]; then
   DECOMPOSE_MODEL="${FORCED_MODEL:-opus}"
   DECOMPOSE_PROMPT="$ORCHESTRATOR_DIR/PROMPT_decompose.md"
+  MAX_DECOMPOSE_ITERATIONS="${RALPH_DECOMPOSE_MAX_ITERATIONS:-5}"
 
   if [ ! -f "$DECOMPOSE_PROMPT" ]; then
     echo "Error: PROMPT_decompose.md not found at $DECOMPOSE_PROMPT"
@@ -632,42 +635,102 @@ if [ "$STAGE" = "decompose" ]; then
     exit 1
   fi
 
-  echo "Decomposing with model: $DECOMPOSE_MODEL"
+  echo "Decomposing with model: $DECOMPOSE_MODEL (max $MAX_DECOMPOSE_ITERATIONS iterations)"
   echo ""
-
-  CLAUDE_ARGS=("--model" "$DECOMPOSE_MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
-  [ -n "$VERBOSE" ] && CLAUDE_ARGS+=("--verbose")
 
   # Save previous log and initialize fresh log for this decompose session
   if [ -f "$LOG_FILE" ]; then
     cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
   fi
   echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
-  echo "Mode: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
+  echo "Stage: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
 
-  # Snapshot plan file mtime before decompose call (cross-platform)
-  DECOMPOSE_MTIME_BEFORE=""
-  if [ -f "$PLAN_FILE" ]; then
-    DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
-  fi
+  DECOMPOSE_ITERATION=0
+  DECOMPOSE_TEMP_OUTPUT=$(mktemp)
+  trap 'rm -f "$DECOMPOSE_TEMP_OUTPUT"' EXIT
 
-  cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
-  DECOMPOSE_EXIT=${PIPESTATUS[0]}
-  echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+  CLAUDE_ARGS=("--model" "$DECOMPOSE_MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
+  [ -n "$VERBOSE" ] && CLAUDE_ARGS+=("--verbose")
 
-  # Post-call verification: warn if IMPLEMENTATION_PLAN.md was not modified
-  if [ "$DECOMPOSE_EXIT" -eq 0 ]; then
+  while true; do
+    DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION + 1))
+
+    # Check for stop signal
+    if [ -f "$STATUS_FILE" ] && grep -qiE 'BREAK|INTERRUPT|STOP' "$STATUS_FILE" 2>/dev/null; then
+      echo "Stop signal detected — exiting decompose mode"
+      echo "=== Decompose stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+      exit 0
+    fi
+
+    # Check iteration limit
+    if [ "$DECOMPOSE_ITERATION" -gt "$MAX_DECOMPOSE_ITERATIONS" ]; then
+      echo "Decompose mode reached iteration limit ($MAX_DECOMPOSE_ITERATIONS)"
+      exit 0
+    fi
+
+    echo "Decompose iteration $DECOMPOSE_ITERATION / $MAX_DECOMPOSE_ITERATIONS"
+
+    # Snapshot plan file mtime before decompose call (cross-platform)
+    DECOMPOSE_MTIME_BEFORE=""
+    if [ -f "$PLAN_FILE" ]; then
+      DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    fi
+
+    set +e
+    cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE" | tee "$DECOMPOSE_TEMP_OUTPUT"
+    DECOMPOSE_EXIT_CODE=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$DECOMPOSE_EXIT_CODE" -ne 0 ]; then
+      error_type=$(classify_error "$DECOMPOSE_TEMP_OUTPUT")
+      echo "Decompose iteration $DECOMPOSE_ITERATION failed (exit $DECOMPOSE_EXIT_CODE, error: $error_type)"
+      case "$error_type" in
+        USAGE_EXHAUSTED)
+          check_all_agent_capacity || true
+          DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION - 1))
+          continue
+          ;;
+        RATE_LIMIT)
+          handle_rate_limit || true
+          DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION - 1))
+          continue
+          ;;
+        OVERLOADED)
+          handle_overloaded || true
+          DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION - 1))
+          continue
+          ;;
+        AUTH_FAILURE)
+          echo "Authentication failure — cannot continue."
+          exit 1
+          ;;
+        *)
+          echo "Decompose mode error — propagating exit code."
+          exit $DECOMPOSE_EXIT_CODE
+          ;;
+      esac
+    fi
+
+    # Semantic done check: if IMPLEMENTATION_PLAN.md unchanged, decomposition is complete
     DECOMPOSE_MTIME_AFTER=""
     if [ -f "$PLAN_FILE" ]; then
       DECOMPOSE_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
     fi
-    if [ -n "$DECOMPOSE_MTIME_BEFORE" ] && [ "$DECOMPOSE_MTIME_BEFORE" = "$DECOMPOSE_MTIME_AFTER" ]; then
-      echo "Warning: IMPLEMENTATION_PLAN.md was not modified by decompose"
-    fi
-  fi
 
-  exit $DECOMPOSE_EXIT
+    if [ -n "$DECOMPOSE_MTIME_BEFORE" ] && [ "$DECOMPOSE_MTIME_BEFORE" = "$DECOMPOSE_MTIME_AFTER" ]; then
+      echo "Decompose complete — IMPLEMENTATION_PLAN.md unchanged after iteration $DECOMPOSE_ITERATION"
+      echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+      exit 0
+    fi
+
+    echo "Decompose iteration $DECOMPOSE_ITERATION complete"
+    echo "=== Decompose iteration $DECOMPOSE_ITERATION ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+    echo ""
+  done
+
+  rm -f "$DECOMPOSE_TEMP_OUTPUT"
+  exit 0
 fi
 
 # ============================================================================
