@@ -171,6 +171,7 @@ fi
 # ============================================================================
 
 PLAN_FILE="IMPLEMENTATION_PLAN.md"
+PLAN_FILE_OUT="IMPLEMENTATION_PLAN.md"
 STATUS_FILE="RALPH_STATUS.txt"
 LOG_FILE="ralph.log"
 ACCUMULATED_LOG_FILE="${RALPH_ACCUMULATED_LOG:-ralph.accumulated.log}"
@@ -203,6 +204,9 @@ VERBOSE=""
 PASSTHROUGH_ARGS=()
 STOP_AFTER_TIME=""   # HH:MM
 STOP_AFTER_DATE=""   # YYYY-MM-DD
+ARG_FROM_PLAN=""
+ARG_TO_PLAN=""
+ARG_WITH_PLAN=""
 
 # Capacity threshold overrides (applied via env vars before sourcing capacity-monitor.sh)
 OVERRIDE_5HR_WARN_THRESHOLD=""
@@ -212,8 +216,8 @@ OVERRIDE_WEEKLY_WARN_THRESHOLD=""
 print_help() {
   echo "Improved Ralph Orchestrator — dynamic model routing for autonomous coding"
   echo ""
-  echo "Usage: $0 [plan] [limit] [--model MODEL] [--verbose] [--no-routing] [--help]"
   echo "Usage: $0 [plan|decompose] [limit] [--limit N] [--stage STAGE] [--model MODEL] [--verbose] [--no-routing] [--help]"
+  echo "       $0 [--from-plan FILE] [--to-plan FILE] [--with-plan FILE]"
   echo "Additional parameters: [--5hr-remaining-warning-threshold N] [--5hr-remaining-critical-threshold N] [--weekly-remaining-warning-threshold N]"
   echo ""
   echo "Stages:"
@@ -231,6 +235,9 @@ print_help() {
   echo "  --5hr-remaining-warning-threshold N       Override 5h WARN threshold (remaining %); triggers pre-sleep when below N"
   echo "  --5hr-remaining-critical-threshold N       Override 5h CRITICAL threshold (remaining %); triggers pre-sleep when below N"
   echo "  --weekly-remaining-warning-threshold N    Override weekly WARN threshold (remaining %); triggers work-week pause when below N"
+  echo "  --from-plan FILE                          Read tasks from FILE (default: IMPLEMENTATION_PLAN.md)"
+  echo "  --to-plan FILE                            Write/monitor plan output in FILE (default: IMPLEMENTATION_PLAN.md)"
+  echo "  --with-plan FILE                          Read and write plan from/to FILE; mutually exclusive with --from-plan/--to-plan"
   echo "  --help                            Show this help message"
   echo ""
   echo "Model Routing:"
@@ -424,6 +431,54 @@ while [[ $# -gt 0 ]]; do
       fi
       shift
       ;;
+    --from-plan)
+      ARG_FROM_PLAN="$2"
+      if [ -z "${ARG_FROM_PLAN:-}" ]; then
+        echo "Error: --from-plan requires a file path"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --from-plan=*)
+      ARG_FROM_PLAN="${1#*=}"
+      if [ -z "${ARG_FROM_PLAN:-}" ]; then
+        echo "Error: --from-plan requires a file path"
+        exit 1
+      fi
+      shift
+      ;;
+    --to-plan)
+      ARG_TO_PLAN="$2"
+      if [ -z "${ARG_TO_PLAN:-}" ]; then
+        echo "Error: --to-plan requires a file path"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --to-plan=*)
+      ARG_TO_PLAN="${1#*=}"
+      if [ -z "${ARG_TO_PLAN:-}" ]; then
+        echo "Error: --to-plan requires a file path"
+        exit 1
+      fi
+      shift
+      ;;
+    --with-plan)
+      ARG_WITH_PLAN="$2"
+      if [ -z "${ARG_WITH_PLAN:-}" ]; then
+        echo "Error: --with-plan requires a file path"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --with-plan=*)
+      ARG_WITH_PLAN="${1#*=}"
+      if [ -z "${ARG_WITH_PLAN:-}" ]; then
+        echo "Error: --with-plan requires a file path"
+        exit 1
+      fi
+      shift
+      ;;
     --help|-h)
       print_help
       exit 0
@@ -435,6 +490,35 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# Validate and resolve plan file flags
+# Rules:
+#   --with-plan FILE          → read and write from/to FILE (exclusive)
+#   --from-plan FILE          → read tasks from FILE
+#   --to-plan FILE            → monitor/write plan output to FILE
+#   --from-plan A --to-plan A → same file = read/write mode (normalised)
+#   defaults unchanged when no flag is given
+# ---------------------------------------------------------------------------
+if [ -n "$ARG_WITH_PLAN" ] && ([ -n "$ARG_FROM_PLAN" ] || [ -n "$ARG_TO_PLAN" ]); then
+  echo "Error: --with-plan cannot be combined with --from-plan or --to-plan"
+  exit 1
+fi
+
+if [ -n "$ARG_WITH_PLAN" ]; then
+  PLAN_FILE="$ARG_WITH_PLAN"
+  PLAN_FILE_OUT="$ARG_WITH_PLAN"
+elif [ -n "$ARG_FROM_PLAN" ] && [ -n "$ARG_TO_PLAN" ]; then
+  PLAN_FILE="$ARG_FROM_PLAN"
+  PLAN_FILE_OUT="$ARG_TO_PLAN"
+  # Same file on both sides → normalise to read/write mode (no-op: both already set)
+elif [ -n "$ARG_FROM_PLAN" ]; then
+  PLAN_FILE="$ARG_FROM_PLAN"
+  # PLAN_FILE_OUT keeps default
+elif [ -n "$ARG_TO_PLAN" ]; then
+  PLAN_FILE_OUT="$ARG_TO_PLAN"
+  # PLAN_FILE keeps default
+fi
 
 STOP_EPOCH=""
 
@@ -615,8 +699,8 @@ if [ "$STAGE" = "plan" ]; then
 
     # Snapshot plan file mtime before calling Claude (cross-platform)
     PLAN_MTIME_BEFORE=""
-    if [ -f "$PLAN_FILE" ]; then
-      PLAN_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      PLAN_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
 
     # Run ralph.sh for one plan pass (ralph.sh is single-pass by design)
@@ -658,14 +742,14 @@ if [ "$STAGE" = "plan" ]; then
       esac
     fi
 
-    # Check if IMPLEMENTATION_PLAN.md was modified (semantic done check)
+    # Check if plan output file was modified (semantic done check)
     PLAN_MTIME_AFTER=""
-    if [ -f "$PLAN_FILE" ]; then
-      PLAN_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      PLAN_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
 
     if [ -n "$PLAN_MTIME_BEFORE" ] && [ "$PLAN_MTIME_BEFORE" = "$PLAN_MTIME_AFTER" ]; then
-      echo "Planning complete — IMPLEMENTATION_PLAN.md unchanged after iteration $PLAN_ITERATION"
+      echo "Planning complete — $PLAN_FILE_OUT unchanged after iteration $PLAN_ITERATION"
       exit 0
     fi
 
@@ -732,8 +816,8 @@ if [ "$STAGE" = "decompose" ]; then
 
     # Snapshot plan file mtime before decompose call (cross-platform)
     DECOMPOSE_MTIME_BEFORE=""
-    if [ -f "$PLAN_FILE" ]; then
-      DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
 
     set +e
@@ -771,14 +855,14 @@ if [ "$STAGE" = "decompose" ]; then
       esac
     fi
 
-    # Semantic done check: if IMPLEMENTATION_PLAN.md unchanged, decomposition is complete
+    # Semantic done check: if plan output file unchanged, decomposition is complete
     DECOMPOSE_MTIME_AFTER=""
-    if [ -f "$PLAN_FILE" ]; then
-      DECOMPOSE_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      DECOMPOSE_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
 
     if [ -n "$DECOMPOSE_MTIME_BEFORE" ] && [ "$DECOMPOSE_MTIME_BEFORE" = "$DECOMPOSE_MTIME_AFTER" ]; then
-      echo "Decompose complete — IMPLEMENTATION_PLAN.md unchanged after iteration $DECOMPOSE_ITERATION"
+      echo "Decompose complete — $PLAN_FILE_OUT unchanged after iteration $DECOMPOSE_ITERATION"
       echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
       exit 0
     fi
