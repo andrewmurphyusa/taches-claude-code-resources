@@ -44,7 +44,7 @@ Select the most important task from the implementation plan, implement it correc
         directories by scanning the repo (exclude `node_modules/`, `.git/`,
         `dist/`, `.cache/`, `coverage/`)
    - d. Study @AGENTS.md (if exists)
-   - e. Study all located files (use up to 500 parallel Sonnet subagents)
+   - e. Study all located files (use up to 500 parallel subagents)
 
 1. Select Task
    - If NEXT-TASK.md exists at repo root, read it — that is the task for this
@@ -56,7 +56,7 @@ Select the most important task from the implementation plan, implement it correc
 2. Investigate Before Implementing
    - Search codebase first (don't assume missing)
    - Understand existing patterns and conventions
-   - Use up to 500 Sonnet subagents for reading/searching
+   - Use up to 500 subagents for reading/searching
    - Study similar existing implementations
    - Identify exactly what needs to change
 
@@ -69,7 +69,7 @@ Select the most important task from the implementation plan, implement it correc
 
 4. Validate
    - Run: {{VALIDATION_COMMANDS}}
-   - Use only 1 Sonnet subagent for build/tests (creates backpressure)
+   - Use only 1 subagent for build/tests (creates backpressure)
    - If validation fails, investigate and fix
    - Do not commit until all validation passes
    - If repeatedly failing, note in plan and move to next task

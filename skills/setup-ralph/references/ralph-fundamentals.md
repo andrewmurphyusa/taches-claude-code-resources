@@ -295,7 +295,7 @@ rm IMPLEMENTATION_PLAN.md
 echo "STOP" > RALPH_STATUS.txt
 ```
 
-Ralph checks `RALPH_STATUS.txt` at the start of each iteration. Any content matching `STOP`, `BREAK`, or `INTERRUPT` (case-insensitive) triggers a clean exit. `ralph.log` gets a timestamped stop entry and `REPORT.md` records `"Stopped via RALPH_STATUS.txt signal."` as the exit reason. `orchestrator.sh` sets this file to `RUNNING` every time it starts, so there's no stale signal between runs and you can tell at a glance whether Ralph is active.
+Ralph checks `RALPH_STATUS.txt` at the start of each iteration. Any content matching `STOP`, `BREAK`, or `INTERRUPT` (case-insensitive) triggers a clean exit. `ralph.log` gets a timestamped stop entry. `orchestrator.sh` sets this file to `RUNNING` every time it starts, so there's no stale signal between runs and you can tell at a glance whether Ralph is active.
 
 **Stop immediately** (kills the current Claude invocation mid-run):
 ```bash
@@ -322,6 +322,13 @@ rm IMPLEMENTATION_PLAN.md
 ```bash
 ./orchestrator.sh 20          # Build mode, max 20 tasks
 ./orchestrator.sh plan 5      # Plan mode, max 5 iterations
+```
+
+**Stop after a wall-clock time:**
+```bash
+./orchestrator.sh --stop-after-time 23:00            # Stop at 23:00 today (tomorrow if already past)
+./orchestrator.sh --stop-after-date 2025-01-15       # Stop at midnight on that date
+./orchestrator.sh --stop-after-date 2025-01-15 --stop-after-time 09:00  # Stop at specific date+time
 ```
 
 **Force a specific model:**

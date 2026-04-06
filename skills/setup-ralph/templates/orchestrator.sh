@@ -596,11 +596,6 @@ fi
 # Load capacity monitoring after overrides are exported
 source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
 
-# debugging
-echo "CAPACITY_5H_CRIT_PCT = $CAPACITY_5H_CRIT_PCT"
-echo "CAPACITY_5H_WARN_PCT = $CAPACITY_5H_WARN_PCT"
-echo "CAPACITY_WEEKLY_WARN_PCT = $CAPACITY_WEEKLY_WARN_PCT"
-
 # ============================================================================
 # TASK READING
 # ============================================================================
@@ -1100,7 +1095,7 @@ while true; do
     EXIT_CODE=$INVOKE_EXIT_CODE
   else
     # Single-engine (Claude-only) path — unchanged
-    LOOP_ARGS=("1" "--model" "$selected_model")
+    LOOP_ARGS=("--model" "$selected_model")
     [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
     export RALPH_MODEL="$selected_model"
     bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee "$TEMP_OUTPUT"
