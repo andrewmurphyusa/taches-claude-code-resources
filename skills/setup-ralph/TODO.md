@@ -43,4 +43,8 @@ This one is a bit bigger to fix, because it requires identifying the actual next
 - at start of each iteration, check whether the current date+time is after the stop date+time
     - if yes then break out of iteration loop and stop
 
+## 8. Remove references to Claude-specific models from `PROMPT_build.md`
 
+- the Build phase may run against Claude Code, Codex, or Gemini.  The build prompt needs to avoid making assumptions about the build engine
+- might necessitate separate `PROMPT_build.md` files for each engine type
+- also need to make sure that it doesn't force Claude into using Sonnet where the plan has determined that it should use Opus or Haiku.

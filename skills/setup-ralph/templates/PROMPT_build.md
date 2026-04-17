@@ -34,21 +34,29 @@ Select the most important task from the implementation plan, implement it correc
 
 ## Process
 
-0a. Study specs/* (use up to 500 parallel Sonnet subagents)
-0b. Study @IMPLEMENTATION_PLAN.md
-0c. Study @AGENTS.md (if exists)
-0d. Reference: src/* (use parallel Sonnet subagents for code reading)
+0. Study existing artifacts
+   - a. Locate specs: check `specs/` first; if absent, scan repo for spec/test
+        files (e.g. `*.spec.*`, `*.test.*`, `tests/`, `__tests__/`)
+   - b. Locate implementation plan: check `IMPLEMENTATION_PLAN.md` at repo root
+        first; if absent, scan for files matching `*PLAN*`, `*ROADMAP*`,
+        `TODO*`, or `BACKLOG*` — use the first match
+   - c. Locate source: check `src/` first; if absent, identify the primary code
+        directories by scanning the repo (exclude `node_modules/`, `.git/`,
+        `dist/`, `.cache/`, `coverage/`)
+   - d. Study @AGENTS.md (if exists)
+   - e. Study all located files (use up to 500 parallel subagents)
 
 1. Select Task
-   - Read @NEXT-TASK.md — this is the task to implement this iteration
-   - If NEXT-TASK.md does not exist, use the first uncompleted task (`- [ ]`)
-     in IMPLEMENTATION_PLAN.md in document order
+   - If NEXT-TASK.md exists at repo root, read it — that is the task for this
+     iteration
+   - Otherwise, open the implementation plan located in step 0b and use the
+     first uncompleted task (`- [ ]`) in document order
    - Only ONE task per iteration
 
 2. Investigate Before Implementing
    - Search codebase first (don't assume missing)
    - Understand existing patterns and conventions
-   - Use up to 500 Sonnet subagents for reading/searching
+   - Use up to 500 subagents for reading/searching
    - Study similar existing implementations
    - Identify exactly what needs to change
 
@@ -61,7 +69,7 @@ Select the most important task from the implementation plan, implement it correc
 
 4. Validate
    - Run: {{VALIDATION_COMMANDS}}
-   - Use only 1 Sonnet subagent for build/tests (creates backpressure)
+   - Use only 1 subagent for build/tests (creates backpressure)
    - If validation fails, investigate and fix
    - Do not commit until all validation passes
    - If repeatedly failing, note in plan and move to next task

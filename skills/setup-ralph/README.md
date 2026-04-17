@@ -54,7 +54,9 @@ your-project/
 │   ├── classify-task.sh
 │   ├── model-config.sh
 │   ├── error-handler.sh
-│   └── stuck-tracker.sh
+│   ├── stuck-tracker.sh
+│   ├── capacity-claude.sh
+│   └── capacity-monitor.sh
 ├── loop-docker.sh       # Docker-wrapped loop (if selected)
 ├── Dockerfile           # Container definition (if selected)
 ├── PROMPT_plan.md       # Planning mode instructions
@@ -91,7 +93,7 @@ your-project/
 After each iteration, you'll see:
 
 ```
-━━━ Iteration 5 Complete (2m 34s) ━━━
+━━━ Execution Complete (2m 34s) ━━━
 ✅ Commit: abc1234 [city] Add procedural building generation
 📁 Files: +2 new, ~3 modified
    🆕 src/CityGenerator.ts
@@ -125,7 +127,7 @@ When Ralph struggles repeatedly, update the environment (specs, AGENTS.md, promp
 echo "STOP" > RALPH_STATUS.txt
 ```
 
-Ralph checks `RALPH_STATUS.txt` at the start of each iteration. Any content matching `STOP`, `BREAK`, or `INTERRUPT` (case-insensitive) triggers a clean exit. `ralph.log` gets a timestamped stop entry and `REPORT.md` records `"Stopped via RALPH_STATUS.txt signal."` as the exit reason.
+Ralph checks `RALPH_STATUS.txt` at the start of each iteration. Any content matching `STOP`, `BREAK`, or `INTERRUPT` (case-insensitive) triggers a clean exit. `ralph.log` gets a timestamped stop entry.
 
 `orchestrator.sh` sets `RALPH_STATUS.txt` to `RUNNING` every time it starts, so there's no stale signal between runs and you can tell at a glance whether Ralph is active.
 

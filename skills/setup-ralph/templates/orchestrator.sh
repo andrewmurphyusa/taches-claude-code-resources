@@ -5,7 +5,7 @@
 # Usage:
 #   ./orchestrator.sh              # Build stage, auto-select model per task
 #   ./orchestrator.sh plan         # Plan stage (uses opus)
-#   ./orchestrator.sh decompose   # Decompose complex tasks (uses opus, one-shot)
+#   ./orchestrator.sh decompose   # Decompose complex tasks (iterative, uses opus)
 #   ./orchestrator.sh 10           # Build stage, max 10 iterations
 #   ./orchestrator.sh --model opus # Force a specific model (disables routing)
 #   ./orchestrator.sh --help       # Show usage
@@ -101,6 +101,62 @@ except Exception as e:
 }
 load_engine_config
 
+# ============================================================================
+# PER-ENGINE TOKEN LOADING
+# ============================================================================
+
+# load_engine_token <engine>
+# Loads the OAuth/API token for the given engine from its dedicated token file.
+# Token file defaults (override via RALPH_TOKEN_FILE_<ENGINE> env var):
+#   claude  -> ~/.claude-oauth-token  -> CLAUDE_CODE_OAUTH_TOKEN
+#   codex   -> ~/.codex-api-token     -> OPENAI_API_KEY
+#   gemini  -> ~/.gemini-api-token    -> GEMINI_API_KEY
+# Skips silently if the corresponding env var is already set.
+load_engine_token() {
+  local engine="$1"
+  local token_file token_env
+
+  case "$engine" in
+    claude)
+      token_file="${RALPH_TOKEN_FILE_CLAUDE:-$HOME/.claude-oauth-token}"
+      token_env="CLAUDE_CODE_OAUTH_TOKEN"
+      ;;
+    codex)
+      token_file="${RALPH_TOKEN_FILE_CODEX:-$HOME/.codex-api-token}"
+      token_env="OPENAI_API_KEY"
+      ;;
+    gemini)
+      token_file="${RALPH_TOKEN_FILE_GEMINI:-$HOME/.gemini-api-token}"
+      token_env="GEMINI_API_KEY"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  # Skip if already set
+  local current_val="${!token_env:-}"
+  if [ -n "$current_val" ]; then
+    return 0
+  fi
+
+  if [ -f "$token_file" ]; then
+    # Security: warn on insecure permissions (should be 600 or more restrictive)
+    local perms
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      perms=$(stat -f %Lp "$token_file" 2>/dev/null)
+    else
+      perms=$(stat -c %a "$token_file" 2>/dev/null)
+    fi
+    if [ -n "$perms" ] && [ "$((perms % 100))" -ne 0 ]; then
+      echo "⚠️  Security warning: $token_file has insecure permissions ($perms)"
+      echo "   Run: chmod 600 $token_file"
+    fi
+    export "$token_env"="$(cat "$token_file")"
+    echo "Loaded $engine token: $token_file -> \$$token_env"
+  fi
+}
+
 # Locate ralph.sh: env var override, or local fork in project root
 LOOP_SH="${RALPH_LOOP_SH:-$ORCHESTRATOR_DIR/ralph.sh}"
 
@@ -115,6 +171,7 @@ fi
 # ============================================================================
 
 PLAN_FILE="IMPLEMENTATION_PLAN.md"
+PLAN_FILE_OUT="IMPLEMENTATION_PLAN.md"
 STATUS_FILE="RALPH_STATUS.txt"
 LOG_FILE="ralph.log"
 ACCUMULATED_LOG_FILE="${RALPH_ACCUMULATED_LOG:-ralph.accumulated.log}"
@@ -147,6 +204,9 @@ VERBOSE=""
 PASSTHROUGH_ARGS=()
 STOP_AFTER_TIME=""   # HH:MM
 STOP_AFTER_DATE=""   # YYYY-MM-DD
+ARG_FROM_PLAN=""
+ARG_TO_PLAN=""
+ARG_WITH_PLAN=""
 
 # Capacity threshold overrides (applied via env vars before sourcing capacity-monitor.sh)
 OVERRIDE_5HR_WARN_THRESHOLD=""
@@ -156,8 +216,8 @@ OVERRIDE_WEEKLY_WARN_THRESHOLD=""
 print_help() {
   echo "Improved Ralph Orchestrator — dynamic model routing for autonomous coding"
   echo ""
-  echo "Usage: $0 [plan] [limit] [--model MODEL] [--verbose] [--no-routing] [--help]"
   echo "Usage: $0 [plan|decompose] [limit] [--limit N] [--stage STAGE] [--model MODEL] [--verbose] [--no-routing] [--help]"
+  echo "       $0 [--from-plan FILE] [--to-plan FILE] [--with-plan FILE]"
   echo "Additional parameters: [--5hr-remaining-warning-threshold N] [--5hr-remaining-critical-threshold N] [--weekly-remaining-warning-threshold N]"
   echo ""
   echo "Stages:"
@@ -175,6 +235,9 @@ print_help() {
   echo "  --5hr-remaining-warning-threshold N       Override 5h WARN threshold (remaining %); triggers pre-sleep when below N"
   echo "  --5hr-remaining-critical-threshold N       Override 5h CRITICAL threshold (remaining %); triggers pre-sleep when below N"
   echo "  --weekly-remaining-warning-threshold N    Override weekly WARN threshold (remaining %); triggers work-week pause when below N"
+  echo "  --from-plan FILE                          Read tasks from FILE (default: IMPLEMENTATION_PLAN.md)"
+  echo "  --to-plan FILE                            Write/monitor plan output in FILE (default: IMPLEMENTATION_PLAN.md)"
+  echo "  --with-plan FILE                          Read and write plan from/to FILE; mutually exclusive with --from-plan/--to-plan"
   echo "  --help                            Show this help message"
   echo ""
   echo "Model Routing:"
@@ -192,15 +255,20 @@ print_help() {
   echo "  Per-hostname config: auth/engines-config.json (see engines-config.json.example)"
   echo ""
   echo "Environment Variables:"
-  echo "  RALPH_MODEL             Default model if routing disabled (default: opus)"
-  echo "  RALPH_LOOP_SH           Path to ralph.sh (default: ./ralph.sh)"
-  echo "  RALPH_MAX_STUCK         Max failures before skipping task (default: 3)"
-  echo "  RALPH_VERBOSE           Enable verbose mode (true/false)"
-  echo "  RALPH_BACKUP            Enable remote backup (true/false, default: true)"
-  echo "  RALPH_ORCHESTRATED      Set by orchestrator — ralph.sh skips stuck file cleanup"
-  echo "  RALPH_MULTI_ENGINE      Enable multi-engine routing (true/false, default: false)"
-  echo "  RALPH_ENGINES           Space-separated engine list (default: claude codex gemini)"
-  echo "  RALPH_CAPACITY_AGENTS   Space-separated capacity agent list (auto-set from RALPH_MULTI_ENGINE)"
+  echo "  RALPH_MODEL                     Default model if routing disabled (default: opus)"
+  echo "  RALPH_LOOP_SH                   Path to ralph.sh (default: ./ralph.sh)"
+  echo "  RALPH_MAX_STUCK                 Max failures before skipping task (default: 3)"
+  echo "  RALPH_VERBOSE                   Enable verbose mode (true/false)"
+  echo "  RALPH_BACKUP                    Enable remote backup (true/false, default: true)"
+  echo "  RALPH_ORCHESTRATED              Set by orchestrator — ralph.sh skips stuck file cleanup"
+  echo "  RALPH_MULTI_ENGINE              Enable multi-engine routing (true/false, default: false)"
+  echo "  RALPH_ENGINES                   Space-separated engine list (default: claude codex gemini)"
+  echo "  RALPH_CAPACITY_AGENTS           Space-separated capacity agent list (auto-set from RALPH_MULTI_ENGINE)"
+  echo "  RALPH_PLAN_MAX_ITERATIONS       Max plan iterations before stopping (default: 5)"
+  echo "  RALPH_DECOMPOSE_MAX_ITERATIONS  Max decompose iterations before stopping (default: 5)"
+  echo "  RALPH_TOKEN_FILE_CLAUDE         Claude token file (default: ~/.claude-oauth-token -> CLAUDE_CODE_OAUTH_TOKEN)"
+  echo "  RALPH_TOKEN_FILE_CODEX          Codex token file (default: ~/.codex-api-token -> OPENAI_API_KEY)"
+  echo "  RALPH_TOKEN_FILE_GEMINI         Gemini token file (default: ~/.gemini-api-token -> GEMINI_API_KEY)"
   echo ""
   echo "Examples:"
   echo "  $0                   # Build with auto model selection"
@@ -363,6 +431,54 @@ while [[ $# -gt 0 ]]; do
       fi
       shift
       ;;
+    --from-plan)
+      ARG_FROM_PLAN="$2"
+      if [ -z "${ARG_FROM_PLAN:-}" ]; then
+        echo "Error: --from-plan requires a file path"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --from-plan=*)
+      ARG_FROM_PLAN="${1#*=}"
+      if [ -z "${ARG_FROM_PLAN:-}" ]; then
+        echo "Error: --from-plan requires a file path"
+        exit 1
+      fi
+      shift
+      ;;
+    --to-plan)
+      ARG_TO_PLAN="$2"
+      if [ -z "${ARG_TO_PLAN:-}" ]; then
+        echo "Error: --to-plan requires a file path"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --to-plan=*)
+      ARG_TO_PLAN="${1#*=}"
+      if [ -z "${ARG_TO_PLAN:-}" ]; then
+        echo "Error: --to-plan requires a file path"
+        exit 1
+      fi
+      shift
+      ;;
+    --with-plan)
+      ARG_WITH_PLAN="$2"
+      if [ -z "${ARG_WITH_PLAN:-}" ]; then
+        echo "Error: --with-plan requires a file path"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --with-plan=*)
+      ARG_WITH_PLAN="${1#*=}"
+      if [ -z "${ARG_WITH_PLAN:-}" ]; then
+        echo "Error: --with-plan requires a file path"
+        exit 1
+      fi
+      shift
+      ;;
     --help|-h)
       print_help
       exit 0
@@ -374,6 +490,35 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# Validate and resolve plan file flags
+# Rules:
+#   --with-plan FILE          → read and write from/to FILE (exclusive)
+#   --from-plan FILE          → read tasks from FILE
+#   --to-plan FILE            → monitor/write plan output to FILE
+#   --from-plan A --to-plan A → same file = read/write mode (normalised)
+#   defaults unchanged when no flag is given
+# ---------------------------------------------------------------------------
+if [ -n "$ARG_WITH_PLAN" ] && ([ -n "$ARG_FROM_PLAN" ] || [ -n "$ARG_TO_PLAN" ]); then
+  echo "Error: --with-plan cannot be combined with --from-plan or --to-plan"
+  exit 1
+fi
+
+if [ -n "$ARG_WITH_PLAN" ]; then
+  PLAN_FILE="$ARG_WITH_PLAN"
+  PLAN_FILE_OUT="$ARG_WITH_PLAN"
+elif [ -n "$ARG_FROM_PLAN" ] && [ -n "$ARG_TO_PLAN" ]; then
+  PLAN_FILE="$ARG_FROM_PLAN"
+  PLAN_FILE_OUT="$ARG_TO_PLAN"
+  # Same file on both sides → normalise to read/write mode (no-op: both already set)
+elif [ -n "$ARG_FROM_PLAN" ]; then
+  PLAN_FILE="$ARG_FROM_PLAN"
+  # PLAN_FILE_OUT keeps default
+elif [ -n "$ARG_TO_PLAN" ]; then
+  PLAN_FILE_OUT="$ARG_TO_PLAN"
+  # PLAN_FILE keeps default
+fi
 
 STOP_EPOCH=""
 
@@ -450,11 +595,6 @@ fi
 
 # Load capacity monitoring after overrides are exported
 source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
-
-# debugging
-echo "CAPACITY_5H_CRIT_PCT = $CAPACITY_5H_CRIT_PCT"
-echo "CAPACITY_5H_WARN_PCT = $CAPACITY_5H_WARN_PCT"
-echo "CAPACITY_WEEKLY_WARN_PCT = $CAPACITY_WEEKLY_WARN_PCT"
 
 # ============================================================================
 # TASK READING
@@ -554,12 +694,12 @@ if [ "$STAGE" = "plan" ]; then
 
     # Snapshot plan file mtime before calling Claude (cross-platform)
     PLAN_MTIME_BEFORE=""
-    if [ -f "$PLAN_FILE" ]; then
-      PLAN_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      PLAN_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
 
-    # Run ralph.sh for one plan iteration (limit=1 enforces single-call contract)
-    LOOP_ARGS=("plan" "1" "--model" "$PLAN_MODEL")
+    # Run ralph.sh for one plan pass (ralph.sh is single-pass by design)
+    LOOP_ARGS=("plan" "--model" "$PLAN_MODEL")
     [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
 
     set +e
@@ -597,14 +737,14 @@ if [ "$STAGE" = "plan" ]; then
       esac
     fi
 
-    # Check if IMPLEMENTATION_PLAN.md was modified (semantic done check)
+    # Check if plan output file was modified (semantic done check)
     PLAN_MTIME_AFTER=""
-    if [ -f "$PLAN_FILE" ]; then
-      PLAN_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      PLAN_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
 
     if [ -n "$PLAN_MTIME_BEFORE" ] && [ "$PLAN_MTIME_BEFORE" = "$PLAN_MTIME_AFTER" ]; then
-      echo "Planning complete — IMPLEMENTATION_PLAN.md unchanged after iteration $PLAN_ITERATION"
+      echo "Planning complete — $PLAN_FILE_OUT unchanged after iteration $PLAN_ITERATION"
       exit 0
     fi
 
@@ -616,10 +756,11 @@ if [ "$STAGE" = "plan" ]; then
   exit 0
 fi
 
-# Decompose stage: one-shot opus analysis to split complex tasks
+# Decompose stage: iterative opus analysis to split complex tasks
 if [ "$STAGE" = "decompose" ]; then
   DECOMPOSE_MODEL="${FORCED_MODEL:-opus}"
   DECOMPOSE_PROMPT="$ORCHESTRATOR_DIR/PROMPT_decompose.md"
+  MAX_DECOMPOSE_ITERATIONS="${RALPH_DECOMPOSE_MAX_ITERATIONS:-5}"
 
   if [ ! -f "$DECOMPOSE_PROMPT" ]; then
     echo "Error: PROMPT_decompose.md not found at $DECOMPOSE_PROMPT"
@@ -632,42 +773,102 @@ if [ "$STAGE" = "decompose" ]; then
     exit 1
   fi
 
-  echo "Decomposing with model: $DECOMPOSE_MODEL"
+  echo "Decomposing with model: $DECOMPOSE_MODEL (max $MAX_DECOMPOSE_ITERATIONS iterations)"
   echo ""
-
-  CLAUDE_ARGS=("--model" "$DECOMPOSE_MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
-  [ -n "$VERBOSE" ] && CLAUDE_ARGS+=("--verbose")
 
   # Save previous log and initialize fresh log for this decompose session
   if [ -f "$LOG_FILE" ]; then
     cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
   fi
   echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
-  echo "Mode: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
+  echo "Stage: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
 
-  # Snapshot plan file mtime before decompose call (cross-platform)
-  DECOMPOSE_MTIME_BEFORE=""
-  if [ -f "$PLAN_FILE" ]; then
-    DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
-  fi
+  DECOMPOSE_ITERATION=0
+  DECOMPOSE_TEMP_OUTPUT=$(mktemp)
+  trap 'rm -f "$DECOMPOSE_TEMP_OUTPUT"' EXIT
 
-  cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
-  DECOMPOSE_EXIT=${PIPESTATUS[0]}
-  echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+  CLAUDE_ARGS=("--model" "$DECOMPOSE_MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
+  [ -n "$VERBOSE" ] && CLAUDE_ARGS+=("--verbose")
 
-  # Post-call verification: warn if IMPLEMENTATION_PLAN.md was not modified
-  if [ "$DECOMPOSE_EXIT" -eq 0 ]; then
+  while true; do
+    DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION + 1))
+
+    # Check for stop signal
+    if [ -f "$STATUS_FILE" ] && grep -qiE 'BREAK|INTERRUPT|STOP' "$STATUS_FILE" 2>/dev/null; then
+      echo "Stop signal detected — exiting decompose mode"
+      echo "=== Decompose stopped via RALPH_STATUS.txt $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+      exit 0
+    fi
+
+    # Check iteration limit
+    if [ "$DECOMPOSE_ITERATION" -gt "$MAX_DECOMPOSE_ITERATIONS" ]; then
+      echo "Decompose mode reached iteration limit ($MAX_DECOMPOSE_ITERATIONS)"
+      exit 0
+    fi
+
+    echo "Decompose iteration $DECOMPOSE_ITERATION / $MAX_DECOMPOSE_ITERATIONS"
+
+    # Snapshot plan file mtime before decompose call (cross-platform)
+    DECOMPOSE_MTIME_BEFORE=""
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      DECOMPOSE_MTIME_BEFORE=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
+    fi
+
+    set +e
+    cat "$DECOMPOSE_PROMPT" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE" | tee "$DECOMPOSE_TEMP_OUTPUT"
+    DECOMPOSE_EXIT_CODE=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$DECOMPOSE_EXIT_CODE" -ne 0 ]; then
+      error_type=$(classify_error "$DECOMPOSE_TEMP_OUTPUT")
+      echo "Decompose iteration $DECOMPOSE_ITERATION failed (exit $DECOMPOSE_EXIT_CODE, error: $error_type)"
+      case "$error_type" in
+        USAGE_EXHAUSTED)
+          check_all_agent_capacity || true
+          DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION - 1))
+          continue
+          ;;
+        RATE_LIMIT)
+          handle_rate_limit || true
+          DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION - 1))
+          continue
+          ;;
+        OVERLOADED)
+          handle_overloaded || true
+          DECOMPOSE_ITERATION=$((DECOMPOSE_ITERATION - 1))
+          continue
+          ;;
+        AUTH_FAILURE)
+          echo "Authentication failure — cannot continue."
+          exit 1
+          ;;
+        *)
+          echo "Decompose mode error — propagating exit code."
+          exit $DECOMPOSE_EXIT_CODE
+          ;;
+      esac
+    fi
+
+    # Semantic done check: if plan output file unchanged, decomposition is complete
     DECOMPOSE_MTIME_AFTER=""
-    if [ -f "$PLAN_FILE" ]; then
-      DECOMPOSE_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE" 2>/dev/null || stat -f %m "$PLAN_FILE" 2>/dev/null || echo "")
+    if [ -f "$PLAN_FILE_OUT" ]; then
+      DECOMPOSE_MTIME_AFTER=$(stat -c %Y "$PLAN_FILE_OUT" 2>/dev/null || stat -f %m "$PLAN_FILE_OUT" 2>/dev/null || echo "")
     fi
-    if [ -n "$DECOMPOSE_MTIME_BEFORE" ] && [ "$DECOMPOSE_MTIME_BEFORE" = "$DECOMPOSE_MTIME_AFTER" ]; then
-      echo "Warning: IMPLEMENTATION_PLAN.md was not modified by decompose"
-    fi
-  fi
 
-  exit $DECOMPOSE_EXIT
+    if [ -n "$DECOMPOSE_MTIME_BEFORE" ] && [ "$DECOMPOSE_MTIME_BEFORE" = "$DECOMPOSE_MTIME_AFTER" ]; then
+      echo "Decompose complete — $PLAN_FILE_OUT unchanged after iteration $DECOMPOSE_ITERATION"
+      echo "=== Decompose session ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+      exit 0
+    fi
+
+    echo "Decompose iteration $DECOMPOSE_ITERATION complete"
+    echo "=== Decompose iteration $DECOMPOSE_ITERATION ended $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+    echo ""
+  done
+
+  rm -f "$DECOMPOSE_TEMP_OUTPUT"
+  exit 0
 fi
 
 # ============================================================================
@@ -686,11 +887,14 @@ invoke_engine() {
   local model="$2"
   local prompt_file="$3"
 
+  # Load per-engine OAuth/API token before dispatch
+  load_engine_token "$engine"
+
   case "$engine" in
     claude)
-      # Delegate to ralph.sh — existing path unchanged
+      # Delegate to ralph.sh for one build pass (ralph.sh is single-pass by design)
       export RALPH_MODEL="$model"
-      local loop_args=("1" "--model" "$model")
+      local loop_args=("--model" "$model")
       [ -n "$VERBOSE" ] && loop_args+=("$VERBOSE")
       bash "$LOOP_SH" "${loop_args[@]}" 2>&1 | tee "$TEMP_OUTPUT"
       INVOKE_EXIT_CODE=${PIPESTATUS[0]}
@@ -891,7 +1095,7 @@ while true; do
     EXIT_CODE=$INVOKE_EXIT_CODE
   else
     # Single-engine (Claude-only) path — unchanged
-    LOOP_ARGS=("1" "--model" "$selected_model")
+    LOOP_ARGS=("--model" "$selected_model")
     [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
     export RALPH_MODEL="$selected_model"
     bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee "$TEMP_OUTPUT"
