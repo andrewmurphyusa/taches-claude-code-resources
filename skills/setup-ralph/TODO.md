@@ -49,7 +49,7 @@ Running "tail -f ralph.log", ran decompose, it decomposed tasks but nothing was 
 - start with environment variable, then add parameter
 - ... there is an environment variable already, I just can't figure out how to set it to "false"...
 
-## 9. Separate "Stuck" from "Has Sub-tasks" statuses in implementation-plan
+## 9. [FIXED] Separate "Stuck" from "Has Sub-tasks" statuses in implementation-plan
 
 - right now both "Stuck" and "Has sub-tasks" are indicated by the letter "S" in the task checkbox in the implementation plan.
 - change the letter used for "Has Sub-tasks" - maybe "P" for "Parent"?
