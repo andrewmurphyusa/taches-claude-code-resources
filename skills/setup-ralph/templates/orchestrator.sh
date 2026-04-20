@@ -235,7 +235,7 @@ print_help() {
   echo "  --help                            Show this help message"
   echo ""
   echo "Model Routing:"
-  echo "  The orchestrator reads each task from IMPLEMENTATION_PLAN.md and"
+  echo "  The orchestrator reads each task from $PLAN_FILE and"
   echo "  classifies it as simple/medium/complex using keyword heuristics:"
   echo "    simple  (rename, format, typo, etc.)      -> haiku"
   echo "    medium  (implement, fix bug, tests, etc.)  -> sonnet"
@@ -950,7 +950,7 @@ while true; do
   if [ -z "$current_task" ]; then
     echo ""
     echo "No incomplete tasks found, but completion check failed."
-    echo "Check IMPLEMENTATION_PLAN.md for tasks that are all [S] skipped."
+    echo "Check $PLAN_FILE for tasks that are all [S] skipped."
     exit 1
   fi
 
