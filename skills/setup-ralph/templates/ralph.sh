@@ -41,7 +41,7 @@ validate_model() {
 }
 validate_model "$MODEL"
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"  # Max failures on same task before skipping
-PLAN_FILE="IMPLEMENTATION_PLAN.md"
+PLAN_FILE="${RALPH_PLAN_FILE:-IMPLEMENTATION_PLAN.md}"
 REPORT_FILE="REPORT.md"
 ACCUMULATED_REPORT_FILE="REPORT.accumulated.md"
 LOG_FILE="ralph.log"
@@ -97,8 +97,16 @@ while [[ $# -gt 0 ]]; do
       validate_model "$MODEL"
       shift 2
       ;;
+    --plan-file)
+      PLAN_FILE="$2"
+      shift 2
+      ;;
+    --plan-file=*)
+      PLAN_FILE="${1#--plan-file=}"
+      shift
+      ;;
     *)
-      echo "Usage: $0 [plan] [--verbose] [--model opus|sonnet|haiku]"
+      echo "Usage: $0 [plan] [--verbose] [--model opus|sonnet|haiku] [--plan-file FILE]"
       echo ""
       echo "Examples:"
       echo "  $0              # Build mode, one execution pass"
@@ -106,10 +114,12 @@ while [[ $# -gt 0 ]]; do
       echo "  $0 --verbose    # Enable verbose logging"
       echo "  $0 --model sonnet  # Use Sonnet instead of Opus"
       echo "  $0 --model haiku   # Use Haiku for simple tasks"
+      echo "  $0 --plan-file MY_PLAN.md  # Use custom plan file"
       echo ""
       echo "Environment variables:"
       echo "  RALPH_MODEL=opus|sonnet|haiku    Default model"
       echo "  RALPH_MAX_STUCK=3                Max failures before skipping task"
+      echo "  RALPH_PLAN_FILE=MY_PLAN.md       Custom plan file (overridden by --plan-file)"
       exit 1
       ;;
   esac
@@ -503,7 +513,7 @@ if command -v check_all_agent_capacity >/dev/null 2>&1; then
 fi
 
 EXECUTION_START=$(date +%s)
-echo "📍 Starting - $(date ‘+%Y-%m-%d %H:%M:%S’)"
+echo "📍 Starting - $(date '+%Y-%m-%d %H:%M:%S')"
 
 # BUILD MODE: Check completion and select task
 if [ "$MODE" = "build" ]; then
