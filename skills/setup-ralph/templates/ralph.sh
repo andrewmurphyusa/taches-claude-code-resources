@@ -546,7 +546,10 @@ fi
 
 # Run Claude with prompt (tee to log file for observability)
 # Watch progress: tail -f ralph.log
-if cat "$PROMPT_FILE" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; then
+PROMPT_TMP=$(mktemp /tmp/ralph-prompt-XXXXXX.md)
+sed "s|IMPLEMENTATION_PLAN\.md|$PLAN_FILE|g" "$PROMPT_FILE" > "$PROMPT_TMP"
+if cat "$PROMPT_TMP" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; then
+  rm -f "$PROMPT_TMP"
   if [ "$MODE" = "build" ]; then
     print_execution_summary "$EXECUTION_START"
     push_to_backup
@@ -555,6 +558,7 @@ if cat "$PROMPT_FILE" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; th
   fi
 else
   EXIT_CODE=$?
+  rm -f "$PROMPT_TMP"
   echo ""
   echo "❌ Claude exited with code $EXIT_CODE"
   cleanup "error" "$EXIT_CODE"
