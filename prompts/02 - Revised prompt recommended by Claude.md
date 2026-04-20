@@ -111,6 +111,8 @@ The prompt files cannot use shell variables because they are piped directly to C
 
 **Plan phase** — decide:
 - Exact CLI flag names and env var precedence.
+    - dev recommends `--plan-file`; accept both `--plan-file <plan file name>` and `--plan-file=<plan file name>`.
+    - dev recommends following existing env var precedence conventions.
 - Whether temp prompt files should go to `/tmp` or a `.ralph-tmp/` dir in the project.
 
 **Plan decisions** - document plan-phase decisions here.
