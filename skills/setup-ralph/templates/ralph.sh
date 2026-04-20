@@ -216,6 +216,13 @@ check_all_tasks_complete() {
       echo "All remaining tasks are skipped — nothing to execute"
       return 0
     fi
+
+    # All remaining tasks are parent containers [P] — nothing executable left
+    local parents=$(grep -c '^\s*- \[P\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
+    if [ "$parents" -gt 0 ]; then
+      echo "All remaining tasks are parent containers — nothing to execute"
+      return 0
+    fi
   fi
 
   return 1  # Still have incomplete tasks
@@ -226,7 +233,7 @@ get_current_task() {
     echo ""
     return
   fi
-  # Get first incomplete task
+  # Get first incomplete task — [P] parent tasks are containers and must not be executed directly
   grep '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null | head -1 | sed 's/.*- \[ \] //' || echo ""
 }
 
@@ -335,8 +342,9 @@ generate_report() {
 
   local completed=$(grep -c '^[[:space:]]*- \[x\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
   local skipped=$(grep -c '^[[:space:]]*- \[S\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
+  local parents=$(grep -c '^[[:space:]]*- \[P\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
   local remaining=$(grep -c '^[[:space:]]*- \[ \]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
-  local total=$((completed + skipped + remaining))
+  local total=$((completed + skipped + parents + remaining))
 
 
   local commit_count=$(git rev-list --count HEAD 2>/dev/null || echo "0")
@@ -359,7 +367,8 @@ Generated: $(date '+%Y-%m-%d %H:%M:%S')
 |--------|-------|
 | Duration | ${minutes}m ${seconds}s |
 | Tasks Completed | $completed / $total |
-| Tasks Skipped | $skipped |
+| Tasks Skipped (stuck) | $skipped |
+| Parent Tasks | $parents |
 | Tasks Remaining | $remaining |
 | Commits | $commit_count |
 | Files Changed | $files_changed |
@@ -389,12 +398,20 @@ EOF
   echo "" >> "$REPORT_FILE"
   grep '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[x\]/- ✓/' >> "$REPORT_FILE" || echo "None" >> "$REPORT_FILE"
 
-  # Add skipped tasks if any
+  # Add skipped tasks if any (only [S] — tasks stuck and skipped by ralph)
   if [ "$skipped" -gt 0 ]; then
     echo "" >> "$REPORT_FILE"
     echo "## Skipped Tasks (stuck)" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     grep '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[S\]/- ⚠/' >> "$REPORT_FILE"
+  fi
+
+  # Add parent container tasks if any (only [P] — container tasks with subtasks)
+  if [ "$parents" -gt 0 ]; then
+    echo "" >> "$REPORT_FILE"
+    echo "## Parent Tasks (containers with subtasks)" >> "$REPORT_FILE"
+    echo "" >> "$REPORT_FILE"
+    grep '^\s*- \[P\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[P\]/- 📦/' >> "$REPORT_FILE"
   fi
 
   # Add remaining tasks if any

@@ -24,7 +24,7 @@ Analyze IMPLEMENTATION_PLAN.md and decompose complex tasks into tier-annotated s
      - Classified as opus-tier AND description is longer than 300 characters
      - Contains "and" connecting distinct actions of different complexity (e.g., "design the auth system and add JSDoc comments")
      - Mentions 5 or more distinct files or components
-   - Skip tasks that are already simple, already have tier annotations like `[sonnet]`, or are already marked `[x]` or `[S]`
+   - Skip tasks that are already simple, already have tier annotations like `[sonnet]`, or are already marked `[x]`, `[S]`, or `[P]`
 
 2. Decompose Each Candidate
    For each candidate task:
@@ -39,16 +39,16 @@ Analyze IMPLEMENTATION_PLAN.md and decompose complex tasks into tier-annotated s
 
 3. Update IMPLEMENTATION_PLAN.md
    For each decomposed task:
-   a. Change the parent task checkbox from `- [ ]` to `- [S]` (container, skipped during execution)
+   a. Change the parent task checkbox from `- [ ]` to `- [P]` (parent container — do NOT execute directly, do NOT mark skipped)
    b. Insert subtasks immediately after the parent, indented with the same style:
       ```
-      - [S] Original complex task description (why: original context)
+      - [P] Original complex task description (why: original context)
         - [ ] [opus] Design the architecture for X
         - [ ] [sonnet] Implement X in src/module.ts
         - [ ] [haiku] Add JSDoc comments to X exports
       ```
    c. Maintain existing priority ordering — do NOT reorder sections
-   d. Do NOT modify completed `[x]` tasks or already-skipped `[S]` tasks
+   d. Do NOT modify completed `[x]` tasks, already-skipped `[S]` tasks, or already-parent `[P]` tasks
 
 4. Exit
    - Do NOT implement any code
@@ -83,7 +83,7 @@ Analyze IMPLEMENTATION_PLAN.md and decompose complex tasks into tier-annotated s
 
 - All complex tasks identified and decomposed
 - Each subtask has a tier annotation `[opus]`, `[sonnet]`, or `[haiku]`
-- Parent tasks marked as `[S]` (container)
+- Parent tasks marked as `[P]` (container — distinct from `[S]` skipped tasks)
 - Subtasks are specific, actionable, and completable in one iteration
 - No code changes made — only IMPLEMENTATION_PLAN.md modified
 - Existing completed/skipped tasks untouched

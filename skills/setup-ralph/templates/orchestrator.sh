@@ -542,16 +542,145 @@ fi
 source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
 
 # ============================================================================
+# BACKWARD COMPATIBILITY MIGRATION
+# ============================================================================
+
+# migrate_legacy_parent_markers
+# Detects plans written before the [P] parent status was introduced.
+# In legacy plans, decomposed parent tasks were marked [S] even though they
+# have child tasks — this caused them to be counted as skipped incorrectly.
+# Migration rule: if an [S] line has at least one more-indented child [ ] task,
+# it was a parent container, not a true skip — convert it to [P].
+migrate_legacy_parent_markers() {
+  if [ ! -f "$PLAN_FILE" ]; then
+    return
+  fi
+
+  local migrated
+  migrated=$(python3 - "$PLAN_FILE" <<'PYEOF' 2>/dev/null || echo "0")
+import re, sys
+
+plan_file = sys.argv[1]
+with open(plan_file, 'r') as f:
+    lines = f.readlines()
+
+changed = 0
+i = 0
+while i < len(lines):
+    line = lines[i]
+    m = re.match(r'^(\s*)- \[S\] (.*)$', line)
+    if m:
+        parent_indent = m.group(1)
+        # Look ahead for more-indented child task lines
+        j = i + 1
+        has_children = False
+        while j < len(lines):
+            cl = lines[j]
+            if cl.strip() == '':
+                j += 1
+                continue
+            child_m = re.match(r'^(\s*)- \[(.)\]', cl)
+            if child_m:
+                if len(child_m.group(1)) > len(parent_indent):
+                    has_children = True
+                    break
+                else:
+                    break
+            else:
+                if len(cl) > 0 and len(cl) - len(cl.lstrip()) > len(parent_indent):
+                    j += 1
+                    continue
+                break
+            j += 1
+        if has_children:
+            lines[i] = re.sub(r'- \[S\]', '- [P]', line, count=1)
+            changed += 1
+    i += 1
+
+if changed:
+    with open(plan_file, 'w') as f:
+        f.writelines(lines)
+print(changed)
+PYEOF
+  )
+
+  if [ "${migrated:-0}" -gt 0 ]; then
+    echo "Migration: converted $migrated legacy [S] parent marker(s) to [P] in $PLAN_FILE"
+  fi
+}
+
+# ============================================================================
 # TASK READING
 # ============================================================================
 
-# Get the current (first incomplete) task from the plan file
+# Get the current (first incomplete) task from the plan file.
+# [P] parent tasks are skipped — we descend to find the first child [ ] task instead.
 get_current_task() {
   if [ ! -f "$PLAN_FILE" ]; then
     echo ""
     return
   fi
   grep '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null | head -1 | sed 's/.*- \[ \] //' || echo ""
+}
+
+# After each task completes, check whether any [P] parent tasks now have all children
+# done and should be auto-completed (marked [x]).
+complete_finished_parents() {
+  if [ ! -f "$PLAN_FILE" ]; then
+    return
+  fi
+
+  # Process each [P] parent line; collect its indented children and see if all are [x]
+  python3 - "$PLAN_FILE" <<'PYEOF' 2>/dev/null || true
+import re, sys
+
+plan_file = sys.argv[1]
+with open(plan_file, 'r') as f:
+    lines = f.readlines()
+
+changed = False
+i = 0
+while i < len(lines):
+    line = lines[i]
+    m = re.match(r'^(\s*)- \[P\] (.*)$', line)
+    if m:
+        parent_indent = m.group(1)
+        child_indent = parent_indent + '  '
+        # Collect child lines (lines more indented than parent)
+        j = i + 1
+        children = []
+        while j < len(lines):
+            cl = lines[j]
+            # If line is blank, skip
+            if cl.strip() == '':
+                j += 1
+                continue
+            # Stop if indentation goes back to parent level or less (non-blank)
+            child_m = re.match(r'^(\s*)- \[(.)\]', cl)
+            if child_m:
+                if len(child_m.group(1)) <= len(parent_indent):
+                    break
+                children.append(cl)
+            else:
+                # Non-task line at deeper indent — still part of this block
+                if len(cl) > 0 and cl[0] == ' ' and len(cl) - len(cl.lstrip()) > len(parent_indent):
+                    j += 1
+                    continue
+                break
+            j += 1
+
+        if children:
+            all_done = all(re.search(r'- \[x\]', c) for c in children)
+            if all_done:
+                lines[i] = re.sub(r'- \[P\]', '- [x]', line, count=1)
+                changed = True
+    i += 1
+
+if changed:
+    with open(plan_file, 'w') as f:
+        f.writelines(lines)
+    print("Auto-completed parent task(s) in " + plan_file)
+PYEOF
 }
 
 # Check if all tasks are complete
@@ -572,6 +701,13 @@ check_all_tasks_complete() {
     skipped=$(grep -c '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
     if [ "$skipped" -gt 0 ]; then
       echo "All remaining tasks are skipped — nothing to execute"
+      return 0
+    fi
+    # All remaining tasks are parent containers [P] — nothing executable left
+    local parents
+    parents=$(grep -c '^\s*- \[P\]' "$PLAN_FILE" 2>/dev/null; [ $? -le 1 ] || echo "0")
+    if [ "$parents" -gt 0 ]; then
+      echo "All remaining tasks are parent containers — nothing to execute"
       return 0
     fi
   fi
@@ -898,6 +1034,11 @@ orchestrator_cleanup() {
 }
 trap orchestrator_cleanup EXIT
 
+# Migrate legacy [S] parent markers to [P] (one-time, idempotent)
+if [ -f "$PLAN_FILE" ]; then
+  migrate_legacy_parent_markers
+fi
+
 # Initialize stuck tracker before main loop
 init_stuck_tracker
 
@@ -950,7 +1091,7 @@ while true; do
   if [ -z "$current_task" ]; then
     echo ""
     echo "No incomplete tasks found, but completion check failed."
-    echo "Check $PLAN_FILE for tasks that are all [S] skipped."
+    echo "Check $PLAN_FILE for tasks that are all [S] skipped or [P] parent containers."
     exit 1
   fi
 
@@ -1055,6 +1196,8 @@ while true; do
     else
       echo "Iteration $ITERATION complete (model: $selected_model)"
     fi
+    # Auto-complete any [P] parent tasks whose children are all [x]
+    complete_finished_parents
     mark_window_start
     reset_error_counters
   else

@@ -51,6 +51,12 @@ Select the most important task from the implementation plan, implement it correc
      iteration
    - Otherwise, open the implementation plan located in step 0b and use the
      first uncompleted task (`- [ ]`) in document order
+   - Task status markers:
+     - `[ ]` — normal task, process it
+     - `[x]` — completed, skip
+     - `[S]` — skipped (stuck), skip
+     - `[P]` — parent container, DO NOT execute directly; its child `[ ]` tasks
+       will be selected by the orchestrator
    - Only ONE task per iteration
 
 2. Investigate Before Implementing
@@ -79,6 +85,8 @@ Select the most important task from the implementation plan, implement it correc
    - Add any new tasks discovered during implementation
    - Note any blockers or issues found
    - Update task descriptions if understanding changed
+   - Do NOT modify `[P]` parent container tasks — the orchestrator auto-completes
+     them to `[x]` when all their child tasks are done
 
 6. Commit
    - Write descriptive commit message
