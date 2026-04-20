@@ -31,6 +31,7 @@ Phase 6 — COMPLETE
 - orchestrator.sh also writes RALPH_STATUS.txt="RUNNING" (line 501) before plan loop
 
 **IMPLEMENTATION_PLAN.md behavior**
+- Default plan file is `IMPLEMENTATION_PLAN.md`; overridable via `--plan-file FILE` CLI flag or `RALPH_PLAN_FILE` env var
 - If exists: claude reads it (PROMPT_plan.md step 0b: "Study @IMPLEMENTATION_PLAN.md") and updates/merges
 - If missing: claude creates it from scratch
 - Done detection: orchestrator checks mtime before/after each plan iteration (lines 556-609)

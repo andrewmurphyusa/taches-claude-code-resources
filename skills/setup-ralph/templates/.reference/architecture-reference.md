@@ -6,7 +6,7 @@ Generated: 2026-04-02 | Source: skills/setup-ralph/templates/
 
 ## System Overview
 
-Three modes: **plan** (generate IMPLEMENTATION_PLAN.md), **decompose** (split complex tasks), **build** (execute tasks). Entry is always via `orchestrator.sh`; build/plan execution is delegated to `ralph.sh`.
+Three modes: **plan** (generate IMPLEMENTATION_PLAN.md, configurable via `--plan-file FILE` or `RALPH_PLAN_FILE` env var), **decompose** (split complex tasks), **build** (execute tasks). Entry is always via `orchestrator.sh`; build/plan execution is delegated to `ralph.sh`.
 
 ---
 
@@ -132,7 +132,7 @@ CLI args
 
 ## Known Constraints
 
-- **No custom input file support**: No CLI flag or env var to point planning at a user-specified input file. Only path: modify PROMPT_plan.md.
+- **Configurable plan file**: The plan filename defaults to `IMPLEMENTATION_PLAN.md` and can be overridden via `--plan-file FILE` CLI flag or `RALPH_PLAN_FILE` env var. Both orchestrator.sh and ralph.sh honour the override; mtime-based done detection uses the resolved filename.
 - **PROMPT_plan.md assumes project structure**: References `specs/*`, `src/lib/*`, `src/*` — will silently find nothing if absent.
 - **Plan mode LIMIT hardcoded to 1 per orchestrator call**: orchestrator.sh passes `"plan" "1"` to ralph.sh; the outer plan loop retries up to RALPH_PLAN_MAX_ITERATIONS.
 - **macOS/Linux path split**: `sed -i` wrapper (`sed_i`) required; `stat` flags differ. Both handled via OSTYPE checks.
