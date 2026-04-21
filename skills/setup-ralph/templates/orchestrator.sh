@@ -1095,10 +1095,8 @@ while true; do
     exit 1
   fi
 
-  # Update stuck tracker with current task (model tier persisted after selection below)
-  update_stuck_tracker "$current_task"
-
   # Check if stuck on this task — skip if exceeded max retries
+  # NOTE: update_stuck_tracker is called exclusively in ralph.sh to prevent double-increment
   if is_stuck; then
     skip_stuck_task "$current_task"
     continue
