@@ -55,17 +55,14 @@ Running "tail -f ralph.log", ran decompose, it decomposed tasks but nothing was 
 - change the letter used for "Has Sub-tasks" - maybe "P" for "Parent"?
 - also add logic that parent tasks are complete when all their child tasks are complete
 
-## 10. Fix: `double stuck-count increment` bug
+## [FIXED] 10. Fix: `double stuck-count increment` bug
 
 - orchestrator.sh:1013 calls `update_stuck_tracker "$current_task"`, writes `.ralph_stuck_tracker` with incremented count. Then ralph.sh is invoked, calls `init_stuck_tracker` (reads the same file) at ralph.sh:457, then calls `update_stuck_tracker "$current_task"` again at ralph.sh:518–519. Since `current_task == LAST_TASK`, the count increments a second time.
 - Result: with `MAX_STUCK=3`, a task is skipped after only **2 real failures** — orchestrator sees `STUCK_COUNT=3` on the 2nd iteration's ralph.sh return because count went 1 → 2 → 3 across two invocations.
 
-## 11. Fix: `{{VALIDATION_COMMANDS}}` placeholder never substituted
+## [NOT A BUG] [BY DESIGN] 11. Fix: `{{VALIDATION_COMMANDS}}` placeholder never substituted
 
-- [PROMPT_build.md:71] `- Run: {{VALIDATION_COMMANDS}}`
-- Neither orchestrator.sh nor ralph.sh performs any substitution before piping `PROMPT_build.md` to Claude (ralph.sh:539 uses raw `cat`). Claude receives the literal string `{{VALIDATION_COMMANDS}}`. Claude may handle this gracefully via heuristics, but per design intent it should receive actual commands such as `npm test` or `pytest`.
-- there is a footer in each plan section with "validation:".
-    - parse this with a small model to resolve what validation commands to use?
+- edit: this is *not* a bug, it is by design - the placeholder is replaced with real validation criteria in the target project when setup-ralph is run.
 
 ## 12. Fix: Ralph.sh model-tier validation limited to Claude models
 

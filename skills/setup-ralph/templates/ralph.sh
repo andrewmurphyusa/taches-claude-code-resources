@@ -7,13 +7,6 @@ set -e  # Exit on error
 # Resolve script directory for sourcing helpers
 LOOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Verify Claude CLI is installed
-if ! command -v claude &>/dev/null; then
-  echo "Error: Claude CLI not found"
-  echo "Install with: npm install -g @anthropic-ai/claude-code"
-  exit 1
-fi
-
 # Cross-platform sed -i wrapper (macOS vs Linux compatibility)
 sed_i() {
   if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -25,21 +18,23 @@ sed_i() {
 
 # Configuration
 MODEL="${RALPH_MODEL:-opus}"
+ENGINE="${RALPH_ENGINE:-claude}"
 VERBOSE="${RALPH_VERBOSE:-false}"
 STATUS_FILE="RALPH_STATUS.txt"
 
-# Validate model against whitelist (security: prevents command injection)
+# Accepts Claude tier aliases (haiku|sonnet|opus) or any non-empty provider-qualified
+# model ID (e.g. gpt-5.3-codex, gemini-3.1-pro-preview) for non-Claude engines.
 validate_model() {
   local model="$1"
   case "$model" in
-    opus|sonnet|haiku) return 0 ;;
-    *)
-      echo "Error: Invalid model '$model'. Allowed: opus, sonnet, haiku"
+    haiku|sonnet|opus) return 0 ;;
+    "")
+      echo "Error: model cannot be empty"
       exit 1
       ;;
+    *) return 0 ;;
   esac
 }
-validate_model "$MODEL"
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"  # Max failures on same task before skipping
 PLAN_FILE="${RALPH_PLAN_FILE:-IMPLEMENTATION_PLAN.md}"
 REPORT_FILE="REPORT.md"
@@ -97,6 +92,10 @@ while [[ $# -gt 0 ]]; do
       validate_model "$MODEL"
       shift 2
       ;;
+    --engine)
+      ENGINE="$2"
+      shift 2
+      ;;
     --plan-file)
       PLAN_FILE="$2"
       shift 2
@@ -106,24 +105,29 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "Usage: $0 [plan] [--verbose] [--model opus|sonnet|haiku] [--plan-file FILE]"
+      echo "Usage: $0 [plan] [--verbose] [--model MODEL] [--engine ENGINE] [--plan-file FILE]"
       echo ""
       echo "Examples:"
-      echo "  $0              # Build mode, one execution pass"
-      echo "  $0 plan         # Plan mode, one planning pass"
-      echo "  $0 --verbose    # Enable verbose logging"
-      echo "  $0 --model sonnet  # Use Sonnet instead of Opus"
-      echo "  $0 --model haiku   # Use Haiku for simple tasks"
-      echo "  $0 --plan-file MY_PLAN.md  # Use custom plan file"
+      echo "  $0                        # Build mode, claude engine"
+      echo "  $0 plan                   # Plan mode, one planning pass"
+      echo "  $0 --verbose              # Enable verbose logging"
+      echo "  $0 --model sonnet         # Use Sonnet instead of Opus"
+      echo "  $0 --engine codex         # Use Codex engine"
+      echo "  $0 --engine gemini        # Use Gemini engine"
+      echo "  $0 --plan-file MY_PLAN.md # Use custom plan file"
       echo ""
       echo "Environment variables:"
-      echo "  RALPH_MODEL=opus|sonnet|haiku    Default model"
-      echo "  RALPH_MAX_STUCK=3                Max failures before skipping task"
-      echo "  RALPH_PLAN_FILE=MY_PLAN.md       Custom plan file (overridden by --plan-file)"
+      echo "  RALPH_ENGINE=claude|codex|gemini  Default engine (default: claude)"
+      echo "  RALPH_MODEL=opus|sonnet|haiku     Default model"
+      echo "  RALPH_MAX_STUCK=3                 Max failures before skipping task"
+      echo "  RALPH_PLAN_FILE=MY_PLAN.md        Custom plan file (overridden by --plan-file)"
       exit 1
       ;;
   esac
 done
+
+# Validate model after all args are parsed (ENGINE may affect what's accepted)
+validate_model "$MODEL"
 
 # ============================================================================
 # REMOTE BACKUP SETUP
@@ -435,6 +439,40 @@ EOF
 }
 
 # ============================================================================
+# ENGINE INVOCATION FUNCTIONS
+# ============================================================================
+
+invoke_claude() {
+  if ! command -v claude &>/dev/null; then
+    echo "Error: Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+    return 1
+  fi
+  local claude_args=("--model" "$MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
+  [ "$VERBOSE" = "true" ] && claude_args+=("--verbose")
+  cat "$PROMPT_TMP" | claude "${claude_args[@]}" 2>&1 | tee -a "$LOG_FILE"
+  # PIPESTATUS[1] is claude's exit code in the cat|claude|tee pipeline
+  return ${PIPESTATUS[1]}
+}
+
+invoke_codex() {
+  if ! command -v codex &>/dev/null; then
+    echo "Error: Codex CLI not found"
+    return 1
+  fi
+  codex exec --model "$MODEL" --sandbox danger-full-access "$(cat "$PROMPT_TMP")" 2>&1 | tee -a "$LOG_FILE"
+  return ${PIPESTATUS[0]}
+}
+
+invoke_gemini() {
+  if ! command -v gemini &>/dev/null; then
+    echo "Error: Gemini CLI not found"
+    return 1
+  fi
+  gemini --model "$MODEL" -p "$(cat "$PROMPT_TMP")" 2>&1 | tee -a "$LOG_FILE"
+  return ${PIPESTATUS[0]}
+}
+
+# ============================================================================
 # CLEANUP ON EXIT
 # ============================================================================
 
@@ -491,16 +529,9 @@ if [ ! -f "$PROMPT_FILE" ]; then
   exit 1
 fi
 
-# Build Claude CLI command as array (security: avoids eval injection)
-CLAUDE_ARGS=("--model" "$MODEL" "-p" "--dangerously-skip-permissions" "--output-format" "text")
-
-if [ "$VERBOSE" = "true" ]; then
-  CLAUDE_ARGS+=("--verbose")
-fi
-
 # Display configuration
+echo "Engine: $ENGINE"
 echo "Model: $MODEL"
-echo "Claude args: ${CLAUDE_ARGS[*]}"
 echo "Prompt: $PROMPT_FILE"
 echo "Stuck threshold: $MAX_STUCK failures"
 echo "Log file: $LOG_FILE (tail -f to watch)"
@@ -520,7 +551,7 @@ fi
 
 # Initialize log file
 echo "=== Ralph Session Started $(date ‘+%Y-%m-%d %H:%M:%S’) ===" > "$LOG_FILE"
-echo "Mode: $MODE | Model: $MODEL" >> "$LOG_FILE"
+echo "Mode: $MODE | Engine: $ENGINE | Model: $MODEL" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
 
 # Check Claude capacity before running (may sleep if thresholds hit).
@@ -561,12 +592,28 @@ if [ "$MODE" = "build" ]; then
   echo "Current task: $current_task"
 fi
 
-# Run Claude with prompt (tee to log file for observability)
+# Apply plan-file substitution and invoke the selected engine
 # Watch progress: tail -f ralph.log
 PROMPT_TMP=$(mktemp /tmp/ralph-prompt-XXXXXX.md)
 sed "s|IMPLEMENTATION_PLAN\.md|$PLAN_FILE|g" "$PROMPT_FILE" > "$PROMPT_TMP"
-if cat "$PROMPT_TMP" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; then
-  rm -f "$PROMPT_TMP"
+
+set +e
+case "$ENGINE" in
+  claude)  invoke_claude  ;;
+  codex)   invoke_codex   ;;
+  gemini)  invoke_gemini  ;;
+  *)
+    echo "Error: Unknown engine '$ENGINE'. Allowed: claude, codex, gemini"
+    rm -f "$PROMPT_TMP"
+    cleanup "error" 1
+    exit 1
+    ;;
+esac
+ENGINE_EXIT_CODE=$?
+set -e
+
+rm -f "$PROMPT_TMP"
+if [ "$ENGINE_EXIT_CODE" -eq 0 ]; then
   if [ "$MODE" = "build" ]; then
     print_execution_summary "$EXECUTION_START"
     push_to_backup
@@ -574,12 +621,10 @@ if cat "$PROMPT_TMP" | claude "${CLAUDE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"; the
     echo "✓ Execution complete"
   fi
 else
-  EXIT_CODE=$?
-  rm -f "$PROMPT_TMP"
   echo ""
-  echo "❌ Claude exited with code $EXIT_CODE"
-  cleanup "error" "$EXIT_CODE"
-  exit $EXIT_CODE
+  echo "❌ $ENGINE exited with code $ENGINE_EXIT_CODE"
+  cleanup "error" "$ENGINE_EXIT_CODE"
+  exit $ENGINE_EXIT_CODE
 fi
 
 cleanup "complete"

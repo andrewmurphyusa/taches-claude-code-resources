@@ -956,62 +956,24 @@ fi
 # MULTI-ENGINE DISPATCH
 # ============================================================================
 
-# invoke_engine <engine> <model> <prompt_file>
-# Dispatches a single iteration to the appropriate CLI based on the engine name.
-# For claude: delegates to ralph.sh (existing path; RALPH_MODEL is set).
-# For codex:  calls codex CLI in headless mode.
-# For gemini: calls gemini CLI in headless mode via -p flag.
-# All engines: captures combined stdout+stderr to TEMP_OUTPUT for error classification.
-# Returns the exit code of the invoked process (stored in INVOKE_EXIT_CODE).
+# invoke_engine <engine> <model>
+# Delegates a single iteration to ralph.sh with the given engine and model.
+# ralph.sh handles prompt selection, plan-file substitution, logging, backup, and
+# report generation uniformly for all engines via its own invoke_* functions.
+# Captures combined stdout+stderr to TEMP_OUTPUT for error classification.
+# Returns the exit code of ralph.sh (stored in INVOKE_EXIT_CODE).
 invoke_engine() {
   local engine="$1"
   local model="$2"
-  local prompt_file="$3"
 
   # Load per-engine OAuth/API token before dispatch
   load_engine_token "$engine"
 
-  case "$engine" in
-    claude)
-      # Delegate to ralph.sh for one build pass (ralph.sh is single-pass by design)
-      export RALPH_MODEL="$model"
-      local loop_args=("--model" "$model")
-      [ -n "$VERBOSE" ] && loop_args+=("$VERBOSE")
-      bash "$LOOP_SH" "${loop_args[@]}" 2>&1 | tee "$TEMP_OUTPUT"
-      INVOKE_EXIT_CODE=${PIPESTATUS[0]}
-      ;;
-    codex)
-      # Codex headless: codex exec --model <model> --sandbox danger-full-access "$(cat prompt)"
-      # danger-full-access grants codebase read/write access analogous to Claude Code's permissions
-      if [ ! -f "$prompt_file" ]; then
-        echo "[ENGINE] codex: prompt file '$prompt_file' not found" | tee -a "$TEMP_OUTPUT"
-        INVOKE_EXIT_CODE=1
-        return 1
-      fi
-      local codex_prompt
-      codex_prompt=$(cat "$prompt_file")
-      codex exec --model "$model" --sandbox danger-full-access "$codex_prompt" 2>&1 | tee "$TEMP_OUTPUT"
-      INVOKE_EXIT_CODE=${PIPESTATUS[0]}
-      ;;
-    gemini)
-      # Gemini headless: gemini --model <model> -p "$(cat prompt)"
-      # The -p flag triggers headless mode automatically (no TTY required)
-      if [ ! -f "$prompt_file" ]; then
-        echo "[ENGINE] gemini: prompt file '$prompt_file' not found" | tee -a "$TEMP_OUTPUT"
-        INVOKE_EXIT_CODE=1
-        return 1
-      fi
-      local gemini_prompt
-      gemini_prompt=$(cat "$prompt_file")
-      gemini --model "$model" -p "$gemini_prompt" 2>&1 | tee "$TEMP_OUTPUT"
-      INVOKE_EXIT_CODE=${PIPESTATUS[0]}
-      ;;
-    *)
-      echo "[ENGINE] Unknown engine '$engine' — cannot dispatch" | tee -a "$TEMP_OUTPUT"
-      INVOKE_EXIT_CODE=1
-      return 1
-      ;;
-  esac
+  export RALPH_MODEL="$model"
+  local loop_args=("--engine" "$engine" "--model" "$model")
+  [ -n "$VERBOSE" ] && loop_args+=("$VERBOSE")
+  bash "$LOOP_SH" "${loop_args[@]}" 2>&1 | tee "$TEMP_OUTPUT"
+  INVOKE_EXIT_CODE=${PIPESTATUS[0]}
 }
 
 # Build stage: iterate with per-task model routing
@@ -1175,11 +1137,11 @@ while true; do
   # Invoke engine for 1 iteration; capture combined stdout+stderr for error classification
   set +e
   if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ]; then
-    invoke_engine "$CURRENT_ENGINE" "$selected_model" "$PROMPT_FILE"
+    invoke_engine "$CURRENT_ENGINE" "$selected_model"
     EXIT_CODE=$INVOKE_EXIT_CODE
   else
-    # Single-engine (Claude-only) path — unchanged
-    LOOP_ARGS=("--model" "$selected_model")
+    # Single-engine (Claude-only) path
+    LOOP_ARGS=("--engine" "claude" "--model" "$selected_model")
     [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
     export RALPH_MODEL="$selected_model"
     bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee "$TEMP_OUTPUT"
@@ -1244,7 +1206,7 @@ while true; do
 
             # Retry with the fallback engine immediately (same ITERATION)
             set +e
-            invoke_engine "$CURRENT_ENGINE" "$selected_model" "$PROMPT_FILE"
+            invoke_engine "$CURRENT_ENGINE" "$selected_model"
             EXIT_CODE=$INVOKE_EXIT_CODE
             set -e
 
@@ -1270,7 +1232,7 @@ while true; do
                   echo "Falling back to tertiary engine: $CURRENT_ENGINE | model: $selected_model" >> "$LOG_FILE"
 
                   set +e
-                  invoke_engine "$CURRENT_ENGINE" "$selected_model" "$PROMPT_FILE"
+                  invoke_engine "$CURRENT_ENGINE" "$selected_model"
                   EXIT_CODE=$INVOKE_EXIT_CODE
                   set -e
 
