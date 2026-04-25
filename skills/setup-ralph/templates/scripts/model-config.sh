@@ -103,14 +103,18 @@ validate_model() {
 }
 
 # upgrade_tier <tier>
-# Upgrades a Claude tier alias one step: haiku -> sonnet -> opus -> opus
-# For provider-qualified model IDs, maps to the next Claude tier alias.
+# Upgrades a Ralph v2 tier one step: Simple -> Moderate -> Complex -> Complex.
+# Legacy Claude aliases (haiku/sonnet/opus) are mapped to the v2 ladder for
+# backward-compatibility during migration.
 upgrade_tier() {
   local tier="$1"
   case "$tier" in
-    haiku)  echo "sonnet" ;;
-    sonnet) echo "opus" ;;
-    opus)   echo "opus" ;;
-    *)      echo "sonnet" ;;
+    Simple)   echo "Moderate" ;;
+    Moderate) echo "Complex" ;;
+    Complex)  echo "Complex" ;;
+    haiku)    echo "Moderate" ;;
+    sonnet)   echo "Complex" ;;
+    opus)     echo "Complex" ;;
+    *)        echo "Moderate" ;;
   esac
 }

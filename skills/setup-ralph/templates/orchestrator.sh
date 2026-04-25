@@ -29,8 +29,15 @@ sed_i() {
 
 # Source helpers
 source "$ORCHESTRATOR_DIR/scripts/model-config.sh"
-source "$ORCHESTRATOR_DIR/scripts/classify-task.sh"
 source "$ORCHESTRATOR_DIR/scripts/error-handler.sh"
+
+# >>> RALPH_V2 routing-load
+# Ralph v2 lane+tier routing: load the centralized routing config and the
+# task-annotation parser. These must come AFTER model-config.sh so that any
+# variables set by model-config cannot shadow the conf values.
+source "$ORCHESTRATOR_DIR/ralph-routing.conf"
+source "$ORCHESTRATOR_DIR/scripts/parse-task.sh"
+# <<< RALPH_V2 routing-load
 
 # Load optional cloud credentials from auth/*.sh (excluding .example templates)
 load_cloud_credentials() {
@@ -62,44 +69,11 @@ load_cloud_credentials() {
 # Load cloud credentials before any Claude invocations
 load_cloud_credentials
 
-# Load optional per-hostname multi-engine gate from auth/engines-config.json.
-# Sets RALPH_MULTI_ENGINE if the current hostname is found in the config.
-# Layer precedence: env var → engines-config.json → default (false)
-load_engine_config() {
-  local config_file="$ORCHESTRATOR_DIR/auth/engines-config.json"
-  if [ ! -f "$config_file" ]; then
-    return 0
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "WARNING: python3 not available — engines-config.json not loaded"
-    return 0
-  fi
-  local result
-  result=$(python3 -c "
-import json, socket, sys
-try:
-  d = json.load(open('$config_file'))
-  hostname = socket.gethostname()
-  hosts = d.get('hosts', {})
-  if hostname in hosts:
-    cfg = hosts[hostname]
-  else:
-    cfg = d.get('default', {})
-  val = cfg.get('RALPH_MULTI_ENGINE')
-  if val is not None:
-    print(str(val).lower())
-  else:
-    print('')
-except Exception as e:
-  print('', file=__import__('sys').stderr)
-  sys.exit(0)
-" 2>/dev/null)
-  if [ -n "$result" ]; then
-    export RALPH_MULTI_ENGINE="$result"
-    echo "Engine config: RALPH_MULTI_ENGINE=$result (from engines-config.json, hostname=$(hostname))"
-  fi
-}
-load_engine_config
+# >>> RALPH_V2 multi-engine-removed
+# Ralph v2: load_engine_config (per-hostname RALPH_MULTI_ENGINE gate) was removed.
+# Engine selection is now deterministic via lane -> engine mapping in
+# ralph-routing.conf. At most one fallback engine per task on capacity exhaustion.
+# <<< RALPH_V2 multi-engine-removed
 
 # ============================================================================
 # PER-ENGINE TOKEN LOADING
@@ -174,24 +148,12 @@ PLAN_FILE="${RALPH_PLAN_FILE:-IMPLEMENTATION_PLAN.md}"
 STATUS_FILE="RALPH_STATUS.txt"
 LOG_FILE="ralph.log"
 ACCUMULATED_LOG_FILE="${RALPH_ACCUMULATED_LOG:-ralph.accumulated.log}"
-ROUTING_ENABLED=true        # Set to false to pass through to ralph.sh without routing
-FORCED_MODEL=""             # If set, overrides routing for all tasks
 
-# Multi-engine: when RALPH_MULTI_ENGINE=true, classify_task() returns a ranked 3-tuple
-# and the orchestrator tries primary → secondary → tertiary on capacity failure.
-# RALPH_MULTI_ENGINE is already set by model-config.sh (default false) and may be
-# overridden by load_engine_config() above or by the RALPH_MULTI_ENGINE env var.
-# Export so classify-task.sh can read it.
-export RALPH_MULTI_ENGINE="${RALPH_MULTI_ENGINE:-false}"
-
-# Set RALPH_CAPACITY_AGENTS to match active engines so capacity-monitor.sh sources
-# all three capacity scripts. Falls back to "claude" for backward compatibility
-# when multi-engine is disabled.
-if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ]; then
-  export RALPH_CAPACITY_AGENTS="${RALPH_CAPACITY_AGENTS:-claude codex gemini}"
-else
-  export RALPH_CAPACITY_AGENTS="${RALPH_CAPACITY_AGENTS:-claude}"
-fi
+# >>> RALPH_V2 capacity-agents
+# Always source all three per-engine capacity scripts so check_engine_capacity()
+# can be called for any lane-selected engine or fallback.
+export RALPH_CAPACITY_AGENTS="${RALPH_CAPACITY_AGENTS:-claude codex gemini}"
+# <<< RALPH_V2 capacity-agents
 
 # ============================================================================
 # ARGUMENT PARSING
@@ -211,54 +173,43 @@ OVERRIDE_5HR_CRIT_THRESHOLD=""
 OVERRIDE_WEEKLY_WARN_THRESHOLD=""
 
 print_help() {
-  echo "Improved Ralph Orchestrator — dynamic model routing for autonomous coding"
+  echo "Improved Ralph Orchestrator — lane+tier routing for autonomous coding"
   echo ""
-  echo "Usage: $0 [plan|decompose] [limit] [--limit N] [--stage STAGE] [--model MODEL] [--verbose] [--no-routing] [--plan-file FILE] [--help]"
+  echo "Usage: $0 [plan|decompose] [limit] [--limit N] [--stage STAGE] [--verbose] [--plan-file FILE] [--help]"
   echo "Additional parameters: [--5hr-remaining-warning-threshold N] [--5hr-remaining-critical-threshold N] [--weekly-remaining-warning-threshold N]"
   echo ""
   echo "Stages:"
   echo "  (default)        Build stage — pick tasks, implement, validate, commit"
   echo "  plan             Plan stage — generate/update IMPLEMENTATION_PLAN.md"
-  echo "  decompose        Decompose complex tasks into tier-annotated subtasks"
+  echo "  decompose        Decompose complex tasks into lane+tier-annotated subtasks"
   echo ""
   echo "Options:"
   echo "  [number]                                  Max iterations (e.g., 10)"
   echo "  --stage STAGE                             Set stage explicitly (build|plan|decompose)"
   echo "  --limit N                                 Max iterations (same as providing a number)"
-  echo "  --model MODEL                             Force a model (haiku|sonnet|opus) — disables routing"
   echo "  --verbose                                 Enable verbose Claude output"
-  echo "  --no-routing                              Disable model routing (use RALPH_MODEL or default)"
   echo "  --5hr-remaining-warning-threshold N       Override 5h WARN threshold (remaining %); triggers pre-sleep when below N"
   echo "  --5hr-remaining-critical-threshold N       Override 5h CRITICAL threshold (remaining %); triggers pre-sleep when below N"
   echo "  --weekly-remaining-warning-threshold N    Override weekly WARN threshold (remaining %); triggers work-week pause when below N"
   echo "  --plan-file FILE                          Plan file to read/write (default: \$RALPH_PLAN_FILE or IMPLEMENTATION_PLAN.md)"
-  echo "  --help                            Show this help message"
+  echo "  --help                                    Show this help message"
   echo ""
-  echo "Model Routing:"
-  echo "  The orchestrator reads each task from $PLAN_FILE and"
-  echo "  classifies it as simple/medium/complex using keyword heuristics:"
-  echo "    simple  (rename, format, typo, etc.)      -> haiku"
-  echo "    medium  (implement, fix bug, tests, etc.)  -> sonnet"
-  echo "    complex (architect, debug, refactor, etc.) -> opus"
-  echo ""
-  echo "Multi-Engine Routing (requires RALPH_MULTI_ENGINE=true):"
-  echo "  When enabled, classify_task() returns a ranked 3-engine list:"
-  echo "    '1.claude:opus 2.codex:gpt-5.3-codex 3.gemini:gemini-3.1-pro-preview'"
-  echo "  The orchestrator tries primary engine first; falls back to secondary/tertiary"
-  echo "  on capacity exhaustion before sleeping."
-  echo "  Per-hostname config: auth/engines-config.json (see engines-config.json.example)"
+  echo "Lane+Tier Routing (Ralph v2):"
+  echo "  Each task in $PLAN_FILE must be annotated:"
+  echo "    - [ ] [LANE:BUILD] [TIER:Moderate] description"
+  echo "  Supported lanes: ARCH | BUILD | VERIFY | GUI | SCAFFOLD"
+  echo "  Supported tiers: Simple | Moderate | Complex"
+  echo "  Orchestrator maps LANE -> engine (ralph-routing.conf). ralph.sh resolves"
+  echo "  MODEL_\${engine}_\${tier}. At most one fallback engine per task on capacity exhaustion."
   echo ""
   echo "Environment Variables:"
-  echo "  RALPH_MODEL                     Default model if routing disabled (default: opus)"
   echo "  RALPH_PLAN_FILE                 Plan file path (default: IMPLEMENTATION_PLAN.md); overridden by --plan-file"
   echo "  RALPH_LOOP_SH                   Path to ralph.sh (default: ./ralph.sh)"
   echo "  RALPH_MAX_STUCK                 Max failures before skipping task (default: 3)"
   echo "  RALPH_VERBOSE                   Enable verbose mode (true/false)"
   echo "  RALPH_BACKUP                    Enable remote backup (true/false, default: true)"
   echo "  RALPH_ORCHESTRATED              Set by orchestrator — ralph.sh skips stuck file cleanup"
-  echo "  RALPH_MULTI_ENGINE              Enable multi-engine routing (true/false, default: false)"
-  echo "  RALPH_ENGINES                   Space-separated engine list (default: claude codex gemini)"
-  echo "  RALPH_CAPACITY_AGENTS           Space-separated capacity agent list (auto-set from RALPH_MULTI_ENGINE)"
+  echo "  RALPH_CAPACITY_AGENTS           Space-separated capacity agent list (default: claude codex gemini)"
   echo "  RALPH_PLAN_MAX_ITERATIONS       Max plan iterations before stopping (default: 5)"
   echo "  RALPH_DECOMPOSE_MAX_ITERATIONS  Max decompose iterations before stopping (default: 5)"
   echo "  RALPH_TOKEN_FILE_CLAUDE         Claude token file (default: ~/.claude-oauth-token -> CLAUDE_CODE_OAUTH_TOKEN)"
@@ -266,11 +217,9 @@ print_help() {
   echo "  RALPH_TOKEN_FILE_GEMINI         Gemini token file (default: ~/.gemini-api-token -> GEMINI_API_KEY)"
   echo ""
   echo "Examples:"
-  echo "  $0                   # Build with auto model selection"
+  echo "  $0                   # Build stage — route each task via lane+tier"
   echo "  $0 plan              # Generate implementation plan"
   echo "  $0 20                # Build stage, max 20 iterations"
-  echo "  $0 --model sonnet    # Force sonnet for all tasks"
-  echo "  $0 plan --model opus # Plan with opus"
   echo "  $0 decompose         # Decompose complex tasks (pre-build step)"
 }
 
@@ -334,16 +283,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --verbose)
       VERBOSE="--verbose"
-      shift
-      ;;
-    --model)
-      FORCED_MODEL="$2"
-      validate_model "$FORCED_MODEL" || exit 1
-      ROUTING_ENABLED=false
-      shift 2
-      ;;
-    --no-routing)
-      ROUTING_ENABLED=false
       shift
       ;;
     --5hr-remaining-warning-threshold)
@@ -602,7 +541,6 @@ if changed:
         f.writelines(lines)
 print(changed)
 PYEOF
-  )
 
   if [ "${migrated:-0}" -gt 0 ]; then
     echo "Migration: converted $migrated legacy [S] parent marker(s) to [P] in $PLAN_FILE"
@@ -722,13 +660,10 @@ check_all_tasks_complete() {
 echo "RUNNING" > "$STATUS_FILE"
 
 echo "============================================"
-echo "  Improved Ralph Orchestrator"
+echo "  Improved Ralph Orchestrator (v2: lane+tier)"
 echo "============================================"
-echo "Stage:    $STAGE"
-echo "Routing: $ROUTING_ENABLED"
-if [ -n "$FORCED_MODEL" ]; then
-  echo "Model:   $FORCED_MODEL (forced)"
-fi
+echo "Stage:   $STAGE"
+echo "Routing: ralph-routing.conf (lane -> engine; [engine+tier] -> model)"
 if [ -n "$LIMIT" ]; then
   echo "Limit:   $LIMIT iterations"
 fi
@@ -736,11 +671,12 @@ echo "Loop:    $LOOP_SH"
 echo "============================================"
 echo ""
 
-# Plan stage: always use opus, iterate with stop conditions
+# Plan stage: uses PLAN_ENGINE_DEFAULT + PLAN_TIER_DEFAULT from ralph-routing.conf
 if [ "$STAGE" = "plan" ]; then
-  PLAN_MODEL="${FORCED_MODEL:-opus}"
+  PLAN_ENGINE="${PLAN_ENGINE_DEFAULT:-claude}"
+  PLAN_TIER="${PLAN_TIER_DEFAULT:-Moderate}"
   MAX_PLAN_ITERATIONS="${RALPH_PLAN_MAX_ITERATIONS:-5}"
-  echo "Planning with model: $PLAN_MODEL (max $MAX_PLAN_ITERATIONS iterations)"
+  echo "Planning with engine: $PLAN_ENGINE | tier: $PLAN_TIER (max $MAX_PLAN_ITERATIONS iterations)"
   echo ""
 
   # Save previous log and initialize fresh log for this plan session
@@ -748,7 +684,7 @@ if [ "$STAGE" = "plan" ]; then
     cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
   fi
   echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
-  echo "Stage: plan | Model: $PLAN_MODEL" >> "$LOG_FILE"
+  echo "Stage: plan | Engine: $PLAN_ENGINE | Tier: $PLAN_TIER" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
 
   PLAN_ITERATION=0
@@ -780,11 +716,11 @@ if [ "$STAGE" = "plan" ]; then
     fi
 
     # Run ralph.sh for one plan pass (ralph.sh is single-pass by design)
-    LOOP_ARGS=("plan" "--model" "$PLAN_MODEL")
+    LOOP_ARGS=("--engine" "$PLAN_ENGINE" "--tier" "$PLAN_TIER" "--stage" "plan")
     [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
 
     set +e
-    RALPH_MODEL="$PLAN_MODEL" bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE" | tee "$PLAN_TEMP_OUTPUT"
+    bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE" | tee "$PLAN_TEMP_OUTPUT"
     PLAN_EXIT_CODE=${PIPESTATUS[0]}
     set -e
 
@@ -837,9 +773,17 @@ if [ "$STAGE" = "plan" ]; then
   exit 0
 fi
 
-# Decompose stage: iterative opus analysis to split complex tasks
+# Decompose stage: uses DECOMPOSE_ENGINE_DEFAULT + DECOMPOSE_TIER_DEFAULT from ralph-routing.conf
 if [ "$STAGE" = "decompose" ]; then
-  DECOMPOSE_MODEL="${FORCED_MODEL:-opus}"
+  DECOMPOSE_ENGINE="${DECOMPOSE_ENGINE_DEFAULT:-claude}"
+  DECOMPOSE_TIER="${DECOMPOSE_TIER_DEFAULT:-Moderate}"
+  # Resolve model from [engine + tier] for direct CLI invocation below
+  _decompose_var="MODEL_${DECOMPOSE_ENGINE}_${DECOMPOSE_TIER}"
+  DECOMPOSE_MODEL="${!_decompose_var:-}"
+  if [ -z "$DECOMPOSE_MODEL" ]; then
+    echo "Error: ${_decompose_var} is unset in ralph-routing.conf"
+    exit 1
+  fi
   DECOMPOSE_PROMPT="$ORCHESTRATOR_DIR/PROMPT_decompose.md"
   MAX_DECOMPOSE_ITERATIONS="${RALPH_DECOMPOSE_MAX_ITERATIONS:-5}"
 
@@ -854,7 +798,7 @@ if [ "$STAGE" = "decompose" ]; then
     exit 1
   fi
 
-  echo "Decomposing with model: $DECOMPOSE_MODEL (max $MAX_DECOMPOSE_ITERATIONS iterations)"
+  echo "Decomposing with engine: $DECOMPOSE_ENGINE | tier: $DECOMPOSE_TIER | model: $DECOMPOSE_MODEL (max $MAX_DECOMPOSE_ITERATIONS iterations)"
   echo ""
 
   # Save previous log and initialize fresh log for this decompose session
@@ -862,7 +806,7 @@ if [ "$STAGE" = "decompose" ]; then
     cat "$LOG_FILE" >> "$ACCUMULATED_LOG_FILE"
   fi
   echo "=== Ralph Session Started $(date '+%Y-%m-%d %H:%M:%S') ===" > "$LOG_FILE"
-  echo "Stage: decompose | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
+  echo "Stage: decompose | Engine: $DECOMPOSE_ENGINE | Tier: $DECOMPOSE_TIER | Model: $DECOMPOSE_MODEL" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
 
   DECOMPOSE_ITERATION=0
@@ -956,25 +900,27 @@ fi
 # MULTI-ENGINE DISPATCH
 # ============================================================================
 
-# invoke_engine <engine> <model>
-# Delegates a single iteration to ralph.sh with the given engine and model.
-# ralph.sh handles prompt selection, plan-file substitution, logging, backup, and
-# report generation uniformly for all engines via its own invoke_* functions.
-# Captures combined stdout+stderr to TEMP_OUTPUT for error classification.
-# Returns the exit code of ralph.sh (stored in INVOKE_EXIT_CODE).
+# >>> RALPH_V2 invoke-engine
+# invoke_engine <engine> <tier> <lane> <stage>
+# Delegates a single iteration to ralph.sh under lane+tier routing.
+# ralph.sh resolves MODEL_${engine}_${tier} from ralph-routing.conf and
+# invokes the selected engine once. Captures combined stdout+stderr to
+# TEMP_OUTPUT for error classification. Sets INVOKE_EXIT_CODE.
 invoke_engine() {
   local engine="$1"
-  local model="$2"
+  local tier="$2"
+  local lane="$3"
+  local stage="$4"
 
   # Load per-engine OAuth/API token before dispatch
   load_engine_token "$engine"
 
-  export RALPH_MODEL="$model"
-  local loop_args=("--engine" "$engine" "--model" "$model")
+  local loop_args=("--engine" "$engine" "--tier" "$tier" "--lane" "$lane" "--stage" "$stage")
   [ -n "$VERBOSE" ] && loop_args+=("$VERBOSE")
   bash "$LOOP_SH" "${loop_args[@]}" 2>&1 | tee "$TEMP_OUTPUT"
   INVOKE_EXIT_CODE=${PIPESTATUS[0]}
 }
+# <<< RALPH_V2 invoke-engine
 
 # Build stage: iterate with per-task model routing
 export RALPH_ORCHESTRATED=true
@@ -1031,8 +977,8 @@ while true; do
     exit 0
   fi
 
-  # Check agent capacity before each iteration (sleeps if thresholds triggered)
-  check_all_agent_capacity || true
+  # Capacity check is now per-selected-engine; it runs AFTER task parsing
+  # (see RALPH_V2 task-routing below) so we know which engine to check.
 
   # Check if plan exists
   if [ ! -f "$PLAN_FILE" ]; then
@@ -1064,68 +1010,63 @@ while true; do
     continue
   fi
 
-  # Determine model / engine priority
-  if [ "$ROUTING_ENABLED" = true ]; then
-    raw_classification=$(classify_task "$current_task")
-    clean_task=$(strip_tier_annotation "$current_task")
-  else
-    raw_classification="${FORCED_MODEL:-${RALPH_MODEL:-opus}}"
-    clean_task="$current_task"
+  # >>> RALPH_V2 task-routing
+  # Parse lane+tier annotation from the current task, map lane -> engine,
+  # and apply stuck-task tier escalation. Model resolution is deferred to
+  # ralph.sh (MODEL_${engine}_${tier} from ralph-routing.conf).
+  if ! validate_task_annotation "$current_task"; then
+    echo "Skipping malformed task — continuing with next." >&2
+    skip_stuck_task "$current_task"
+    continue
   fi
+  parse_task_annotation "$current_task"
 
-  # Parse ENGINE_PRIORITY array and select primary engine+model
-  CURRENT_ENGINE="claude"
-  selected_model="$raw_classification"
-  ENGINE_PRIORITY=()
-  PROVIDER_INDEX=0
-
-  if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ] && echo "$raw_classification" | grep -qE '^[0-9]+\.[a-z]+:'; then
-    # Multi-engine mode: parse ranked 3-tuple into ENGINE_PRIORITY array
-    # e.g. "1.claude:opus 2.codex:gpt-5.3-codex 3.gemini:gemini-3.1-pro-preview"
-    while IFS= read -r entry; do
-      # Each entry: "N.engine:model" — strip the "N." prefix
-      entry_no_rank="${entry#*.}"   # "engine:model"
-      ENGINE_PRIORITY+=("$entry_no_rank")
-    done < <(echo "$raw_classification" | tr ' ' '\n' | grep -E '^[0-9]+\.[a-z]+:')
-
-    if [ "${#ENGINE_PRIORITY[@]}" -gt 0 ]; then
-      CURRENT_ENGINE="${ENGINE_PRIORITY[0]%%:*}"
-      selected_model="${ENGINE_PRIORITY[0]##*:}"
-    fi
+  # Map lane -> engine (with BUILD_ENGINE_DEFAULT fallback if lane mapping unset)
+  CURRENT_ENGINE="$(resolve_lane_engine "$TASK_LANE")"
+  if [ -z "$CURRENT_ENGINE" ]; then
+    CURRENT_ENGINE="${BUILD_ENGINE_DEFAULT:-claude}"
   fi
+  FALLBACK_ENGINE="$(resolve_lane_fallback "$TASK_LANE")"
 
-  # Tier escalation: if stuck >= 2 on same task, upgrade model one tier
+  selected_tier="$TASK_TIER"
+  clean_task="$TASK_CLEAN"
+
+  # Tier escalation: if stuck >= 2 on same task (below max), bump one step.
   escalated=""
   if [ "$STUCK_COUNT" -ge 2 ] && [ "$STUCK_COUNT" -lt "$MAX_STUCK" ]; then
-    if [ "$selected_model" != "opus" ]; then
-      original_model="$selected_model"
-      selected_model=$(upgrade_tier "$selected_model")
-      escalated=" (escalated from $original_model)"
+    if [ "$selected_tier" != "Complex" ]; then
+      original_tier="$selected_tier"
+      selected_tier="$(upgrade_tier "$selected_tier")"
+      escalated=" (escalated from $original_tier)"
     fi
   fi
 
-  # Persist the selected model tier and engine in the stuck tracker
-  CURRENT_MODEL_TIER="$selected_model"
+  # Persist the selected tier and engine in the stuck tracker
+  CURRENT_MODEL_TIER="$selected_tier"
   echo "LAST_TASK=\"$LAST_TASK\"" > "$STUCK_FILE"
   echo "STUCK_COUNT=$STUCK_COUNT" >> "$STUCK_FILE"
   echo "CURRENT_MODEL_TIER=$CURRENT_MODEL_TIER" >> "$STUCK_FILE"
   echo "CURRENT_ENGINE=$CURRENT_ENGINE" >> "$STUCK_FILE"
 
+  # Per-engine capacity check on the selected engine (sleeps if thresholds triggered)
+  check_engine_capacity "$CURRENT_ENGINE" || true
+  # <<< RALPH_V2 task-routing
+
   # Communicate selected task to Claude via NEXT-TASK.md
   echo "$clean_task" > "NEXT-TASK.md"
 
+  # >>> RALPH_V2 routing-log
   echo "---"
   echo "Orchestrator iteration $ITERATION"
-  echo "Task:  $clean_task"
+  echo "Task:   $clean_task"
+  echo "Lane:   $TASK_LANE"
+  echo "Tier:   $selected_tier$escalated"
+  echo "Engine: $CURRENT_ENGINE"
+  echo "Stuck:  $STUCK_COUNT/$MAX_STUCK"
   echo "Task: $clean_task" >> "$LOG_FILE"
-  if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ]; then
-    echo "Engine: $CURRENT_ENGINE | Model: $selected_model$escalated"
-    echo "Engine: $CURRENT_ENGINE | Model: $selected_model$escalated" >> "$LOG_FILE"
-  else
-    echo "Model: $selected_model$escalated"
-  fi
-  echo "Stuck: $STUCK_COUNT/$MAX_STUCK"
+  echo "Lane: $TASK_LANE | Tier: $selected_tier$escalated | Engine: $CURRENT_ENGINE" >> "$LOG_FILE"
   echo "---"
+  # <<< RALPH_V2 routing-log
 
   # Pre-flight token estimation on the prompt file
   PROMPT_FILE="PROMPT_build.md"
@@ -1134,28 +1075,19 @@ while true; do
   token_estimate=$(estimate_prompt_tokens "$PROMPT_FILE")
   echo "Token estimate: ~$token_estimate (from $PROMPT_FILE)"
 
-  # Invoke engine for 1 iteration; capture combined stdout+stderr for error classification
+  # >>> RALPH_V2 invoke-call
+  # Invoke the single selected engine for one iteration; capture combined
+  # stdout+stderr for error classification. ralph.sh resolves the model from
+  # MODEL_${engine}_${tier} via ralph-routing.conf.
   set +e
-  if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ]; then
-    invoke_engine "$CURRENT_ENGINE" "$selected_model"
-    EXIT_CODE=$INVOKE_EXIT_CODE
-  else
-    # Single-engine (Claude-only) path
-    LOOP_ARGS=("--engine" "claude" "--model" "$selected_model")
-    [ -n "$VERBOSE" ] && LOOP_ARGS+=("$VERBOSE")
-    export RALPH_MODEL="$selected_model"
-    bash "$LOOP_SH" "${LOOP_ARGS[@]}" 2>&1 | tee "$TEMP_OUTPUT"
-    EXIT_CODE=${PIPESTATUS[0]}
-  fi
+  invoke_engine "$CURRENT_ENGINE" "$selected_tier" "$TASK_LANE" "build"
+  EXIT_CODE=$INVOKE_EXIT_CODE
   set -e
+  # <<< RALPH_V2 invoke-call
 
   if [ "$EXIT_CODE" -eq 0 ]; then
     echo ""
-    if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ]; then
-      echo "Iteration $ITERATION complete (engine: ${CURRENT_ENGINE:-claude} | model: $selected_model)"
-    else
-      echo "Iteration $ITERATION complete (model: $selected_model)"
-    fi
+    echo "Iteration $ITERATION complete (engine: $CURRENT_ENGINE | tier: $selected_tier)"
     # Auto-complete any [P] parent tasks whose children are all [x]
     complete_finished_parents
     mark_window_start
@@ -1178,13 +1110,13 @@ while true; do
         continue
         ;;
       USAGE_EXHAUSTED)
-        echo "Usage window exhausted on engine: ${CURRENT_ENGINE:-claude}"
+        # >>> RALPH_V2 fallback
+        echo "Usage window exhausted on engine: $CURRENT_ENGINE"
 
         # Write reset epoch to per-engine estimate file for non-Claude engines
-        # (Gemini epoch-file approach; Codex uses the same file for reactive detection)
         _now=$(date +%s)
         _default_reset_epoch=$(( _now + 18300 ))   # 5h + 5min buffer fallback
-        case "${CURRENT_ENGINE:-claude}" in
+        case "$CURRENT_ENGINE" in
           codex)
             echo "$_default_reset_epoch" > "/tmp/ralph-codex-reset.epoch" 2>/dev/null || true
             ;;
@@ -1193,104 +1125,50 @@ while true; do
             ;;
         esac
 
-        # Multi-engine fallback: try secondary/tertiary engine before sleeping
-        _provider_fallback=false
-        if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ] && [ "${#ENGINE_PRIORITY[@]}" -gt 1 ]; then
-          _next_index=$(( PROVIDER_INDEX + 1 ))
-          if [ "$_next_index" -lt "${#ENGINE_PRIORITY[@]}" ]; then
-            PROVIDER_INDEX=$_next_index
-            CURRENT_ENGINE="${ENGINE_PRIORITY[$PROVIDER_INDEX]%%:*}"
-            selected_model="${ENGINE_PRIORITY[$PROVIDER_INDEX]##*:}"
-            echo "Falling back to engine: $CURRENT_ENGINE | model: $selected_model"
-            echo "Falling back to engine: $CURRENT_ENGINE | model: $selected_model" >> "$LOG_FILE"
+        # Single-fallback: try the lane's fallback engine exactly once (no chaining).
+        _fallback_succeeded=false
+        if [ -n "$FALLBACK_ENGINE" ] && [ "$FALLBACK_ENGINE" != "$CURRENT_ENGINE" ]; then
+          echo "Falling back to engine: $FALLBACK_ENGINE | tier: $selected_tier | lane: $TASK_LANE"
+          echo "Falling back to engine: $FALLBACK_ENGINE | tier: $selected_tier | lane: $TASK_LANE" >> "$LOG_FILE"
 
-            # Retry with the fallback engine immediately (same ITERATION)
-            set +e
-            invoke_engine "$CURRENT_ENGINE" "$selected_model"
-            EXIT_CODE=$INVOKE_EXIT_CODE
-            set -e
+          set +e
+          invoke_engine "$FALLBACK_ENGINE" "$selected_tier" "$TASK_LANE" "build"
+          EXIT_CODE=$INVOKE_EXIT_CODE
+          set -e
 
-            if [ "$EXIT_CODE" -eq 0 ]; then
-              echo ""
-              echo "Iteration $ITERATION complete (fallback engine: $CURRENT_ENGINE | model: $selected_model)"
-              mark_window_start
-              reset_error_counters
-              _provider_fallback=true
-            else
-              # Check if the fallback engine also hit a capacity error
-              error_type=$(classify_error "$TEMP_OUTPUT")
-              if [ "$error_type" = "USAGE_EXHAUSTED" ]; then
-                echo "Fallback engine $CURRENT_ENGINE also exhausted."
-                _provider_fallback=false
-                # Try tertiary if available
-                _next_index2=$(( PROVIDER_INDEX + 1 ))
-                if [ "$_next_index2" -lt "${#ENGINE_PRIORITY[@]}" ]; then
-                  PROVIDER_INDEX=$_next_index2
-                  CURRENT_ENGINE="${ENGINE_PRIORITY[$PROVIDER_INDEX]%%:*}"
-                  selected_model="${ENGINE_PRIORITY[$PROVIDER_INDEX]##*:}"
-                  echo "Falling back to tertiary engine: $CURRENT_ENGINE | model: $selected_model"
-                  echo "Falling back to tertiary engine: $CURRENT_ENGINE | model: $selected_model" >> "$LOG_FILE"
-
-                  set +e
-                  invoke_engine "$CURRENT_ENGINE" "$selected_model"
-                  EXIT_CODE=$INVOKE_EXIT_CODE
-                  set -e
-
-                  if [ "$EXIT_CODE" -eq 0 ]; then
-                    echo ""
-                    echo "Iteration $ITERATION complete (tertiary engine: $CURRENT_ENGINE | model: $selected_model)"
-                    mark_window_start
-                    reset_error_counters
-                    _provider_fallback=true
-                  fi
-                fi
-              else
-                _provider_fallback=false
-              fi
-            fi
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo ""
+            echo "Iteration $ITERATION complete (fallback engine: $FALLBACK_ENGINE | tier: $selected_tier)"
+            mark_window_start
+            reset_error_counters
+            _fallback_succeeded=true
           fi
         fi
 
-        if [ "$_provider_fallback" = true ]; then
-          # Fallback succeeded — continue to next iteration
+        if [ "$_fallback_succeeded" = true ]; then
           echo ""
           continue
         fi
 
-        # All providers tried or single-engine mode — sleep until reset
-        echo "All available engines exhausted — fetching fresh capacity data."
-        # Invalidate stale cache for the original engine so next fetch is fresh
-        invalidate_${CURRENT_ENGINE:-claude}_capacity_cache 2>/dev/null || true
+        # No fallback configured, fallback failed, or fallback also exhausted —
+        # sleep until the primary engine's window resets (no further engine switches).
+        echo "Engine $CURRENT_ENGINE exhausted and fallback unavailable/failed — fetching fresh capacity."
+        invalidate_${CURRENT_ENGINE}_capacity_cache 2>/dev/null || true
+        check_engine_capacity "$CURRENT_ENGINE" || true
 
-        # Re-fetch fresh capacity to populate CAPACITY_5H_RESET_EPOCH
-        check_all_agent_capacity || true
-
-        # Use minimum reset epoch across all engines if multi-engine; else Claude's epoch
-        if [ "${RALPH_MULTI_ENGINE:-false}" = "true" ]; then
-          _min_epoch=$(_compute_min_reset_epoch)
-          _now=$(date +%s)
-          if [ "${_min_epoch:-0}" -gt "$_now" ] 2>/dev/null && [ "${_min_epoch:-0}" -gt 0 ] 2>/dev/null; then
-            _wait=$(( _min_epoch - _now + 30 ))
-            echo "Sleeping ${_wait}s until earliest engine reset (epoch ${_min_epoch})."
-            sleep "$_wait"
-          else
-            sleep_until_window_resets
-          fi
+        _now=$(date +%s)
+        if [ "${CAPACITY_5H_RESET_EPOCH:-0}" -gt "$_now" ] 2>/dev/null; then
+          _wait=$(( CAPACITY_5H_RESET_EPOCH - _now + 30 ))
+          echo "Sleeping ${_wait}s until server-reported 5h reset (epoch $CAPACITY_5H_RESET_EPOCH)."
+          sleep "$_wait"
         else
-          # Single-engine path: prefer server-authoritative reset epoch
-          _now=$(date +%s)
-          if [ "${CAPACITY_5H_RESET_EPOCH:-0}" -gt "$_now" ] 2>/dev/null; then
-            _wait=$(( CAPACITY_5H_RESET_EPOCH - _now + 30 ))
-            echo "Sleeping ${_wait}s until server-reported 5h reset (epoch $CAPACITY_5H_RESET_EPOCH)."
-            sleep "$_wait"
-          else
-            sleep_until_window_resets
-          fi
+          sleep_until_window_resets
         fi
 
         # Don't increment ITERATION — retry the same task after sleep
         ITERATION=$((ITERATION - 1))
         continue
+        # <<< RALPH_V2 fallback
         ;;
       RATE_LIMIT)
         if handle_rate_limit; then

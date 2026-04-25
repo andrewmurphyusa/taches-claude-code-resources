@@ -295,3 +295,65 @@ check_all_agent_capacity() {
 
   return 0
 }
+
+# >>> RALPH_V2 per-engine-capacity
+# check_engine_capacity <engine>
+# Per-engine variant of check_all_agent_capacity. Fetches capacity only for the
+# given engine, applies the same 5h/weekly threshold rules, and sleeps if
+# triggered. Never returns non-zero on fetch failure — logs and skips so Ralph
+# is not blocked by a broken capacity endpoint.
+check_engine_capacity() {
+  local _agent="$1"
+  local remaining_pct_5h epoch_5h remaining_pct_weekly epoch_weekly
+  local now wait_secs time_until_reset sleep_secs
+
+  if [ -z "$_agent" ]; then
+    return 0
+  fi
+
+  # Fetch capacity data for only this engine — skip on any failure
+  if ! fetch_${_agent}_capacity 2>/dev/null; then
+    return 0
+  fi
+
+  remaining_pct_5h=$CAPACITY_5H_REMAINING_PCT
+  epoch_5h=$CAPACITY_5H_RESET_EPOCH
+  remaining_pct_weekly=$CAPACITY_WEEKLY_REMAINING_PCT
+  epoch_weekly=$CAPACITY_WEEKLY_RESET_EPOCH
+
+  if [ "$remaining_pct_5h" -lt "$CAPACITY_5H_CRIT_PCT" ]; then
+    now=$(date +%s)
+    if [ "${epoch_5h:-0}" -gt "$now" ] 2>/dev/null && [ "${epoch_5h:-0}" -gt 0 ] 2>/dev/null; then
+      wait_secs=$((epoch_5h - now + 30))
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting until 5h reset (${wait_secs}s)"
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting until 5h reset (${wait_secs}s)" >> "$LOG_FILE"
+    else
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — 5h critical (no reset epoch, continuing)"
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — 5h critical (no reset epoch, continuing)" >> "$LOG_FILE"
+    fi
+    _check_5h_capacity "$_agent" "$remaining_pct_5h" "$epoch_5h"
+
+  elif [ "$remaining_pct_5h" -lt "$CAPACITY_5H_WARN_PCT" ]; then
+    now=$(date +%s)
+    time_until_reset=$((${epoch_5h:-0} - now))
+    if [ "$time_until_reset" -gt 0 ] && [ "${epoch_5h:-0}" -gt 0 ] 2>/dev/null; then
+      sleep_secs=$((time_until_reset / 3))
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting 1/3 of reset window (${sleep_secs}s)"
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — waiting 1/3 of reset window (${sleep_secs}s)" >> "$LOG_FILE"
+      _check_5h_capacity "$_agent" "$remaining_pct_5h" "$epoch_5h"
+    else
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK"
+      echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK" >> "$LOG_FILE"
+    fi
+
+  elif [ "$remaining_pct_weekly" -lt "$CAPACITY_WEEKLY_WARN_PCT" ]; then
+    _check_weekly_capacity "$_agent" "$remaining_pct_5h" "$remaining_pct_weekly" "$epoch_weekly"
+
+  else
+    echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK"
+    echo "[CAPACITY] $_agent 5h=${remaining_pct_5h}% weekly=${remaining_pct_weekly}% — OK" >> "$LOG_FILE"
+  fi
+
+  return 0
+}
+# <<< RALPH_V2 per-engine-capacity

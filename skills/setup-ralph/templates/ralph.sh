@@ -7,6 +7,17 @@ set -e  # Exit on error
 # Resolve script directory for sourcing helpers
 LOOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# >>> RALPH_V2 routing-load
+# Load Ralph v2 lane+tier routing config (MODEL_${engine}_${tier} table,
+# stage defaults). parse-task.sh exposes resolve_model() for indirect lookup.
+if [ -f "$LOOP_DIR/ralph-routing.conf" ]; then
+  source "$LOOP_DIR/ralph-routing.conf"
+fi
+if [ -f "$LOOP_DIR/scripts/parse-task.sh" ]; then
+  source "$LOOP_DIR/scripts/parse-task.sh"
+fi
+# <<< RALPH_V2 routing-load
+
 # Cross-platform sed -i wrapper (macOS vs Linux compatibility)
 sed_i() {
   if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -16,25 +27,29 @@ sed_i() {
   fi
 }
 
+# >>> RALPH_V2 config
 # Configuration
-MODEL="${RALPH_MODEL:-opus}"
+MODEL="${RALPH_MODEL:-}"      # resolved later from MODEL_${ENGINE}_${TIER} if empty
+MODEL_EXPLICIT=0              # set to 1 when --model is passed (debug override)
 ENGINE="${RALPH_ENGINE:-claude}"
+TIER=""                       # Simple | Moderate | Complex (from --tier)
+LANE=""                       # ARCH | BUILD | VERIFY | GUI | SCAFFOLD (from --lane)
+STAGE="build"                 # build | plan | decompose (from --stage)
 VERBOSE="${RALPH_VERBOSE:-false}"
 STATUS_FILE="RALPH_STATUS.txt"
 
-# Accepts Claude tier aliases (haiku|sonnet|opus) or any non-empty provider-qualified
-# model ID (e.g. gpt-5.3-codex, gemini-3.1-pro-preview) for non-Claude engines.
+# Accept any non-empty model ID. Model selection is authoritative via
+# ralph-routing.conf (MODEL_${engine}_${tier}); validate_model only catches
+# the empty-string case.
 validate_model() {
   local model="$1"
-  case "$model" in
-    haiku|sonnet|opus) return 0 ;;
-    "")
-      echo "Error: model cannot be empty"
-      exit 1
-      ;;
-    *) return 0 ;;
-  esac
+  if [ -z "$model" ]; then
+    echo "Error: model cannot be empty"
+    exit 1
+  fi
+  return 0
 }
+# <<< RALPH_V2 config
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"  # Max failures on same task before skipping
 PLAN_FILE="${RALPH_PLAN_FILE:-IMPLEMENTATION_PLAN.md}"
 REPORT_FILE="REPORT.md"
@@ -74,13 +89,17 @@ if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
   echo ""
 fi
 
-# Parse arguments
+# >>> RALPH_V2 arg-parse
+# Parse arguments. Ralph v2 lane+tier routing adds --tier, --lane, --stage.
+# --model is retained as a DEBUG OVERRIDE only — under normal invocation the
+# orchestrator passes --engine+--tier and ralph.sh resolves MODEL from conf.
 MODE="build"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     plan)
       MODE="plan"
+      STAGE="plan"
       shift
       ;;
     --verbose)
@@ -89,11 +108,25 @@ while [[ $# -gt 0 ]]; do
       ;;
     --model)
       MODEL=$2
+      MODEL_EXPLICIT=1
       validate_model "$MODEL"
       shift 2
       ;;
     --engine)
       ENGINE="$2"
+      shift 2
+      ;;
+    --tier)
+      TIER="$2"
+      shift 2
+      ;;
+    --lane)
+      LANE="$2"
+      shift 2
+      ;;
+    --stage)
+      STAGE="$2"
+      MODE="$2"
       shift 2
       ;;
     --plan-file)
@@ -105,29 +138,84 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "Usage: $0 [plan] [--verbose] [--model MODEL] [--engine ENGINE] [--plan-file FILE]"
+      echo "Usage: $0 [plan] [--verbose] [--engine ENGINE] [--tier TIER] [--lane LANE] [--stage STAGE] [--model MODEL] [--plan-file FILE]"
+      echo ""
+      echo "Ralph v2 lane+tier routing:"
+      echo "  --engine ENGINE   claude | codex | gemini (default: claude)"
+      echo "  --tier TIER       Simple | Moderate | Complex — resolves MODEL_\${engine}_\${tier} from ralph-routing.conf"
+      echo "  --lane LANE       ARCH | BUILD | VERIFY | GUI | SCAFFOLD (informational; engine is chosen by orchestrator)"
+      echo "  --stage STAGE     build | plan | decompose (default: build)"
+      echo ""
+      echo "Debug override:"
+      echo "  --model MODEL     Force a specific model ID, bypassing tier resolution."
+      echo "                    Normally inferred from --engine + --tier via ralph-routing.conf."
       echo ""
       echo "Examples:"
-      echo "  $0                        # Build mode, claude engine"
-      echo "  $0 plan                   # Plan mode, one planning pass"
-      echo "  $0 --verbose              # Enable verbose logging"
-      echo "  $0 --model sonnet         # Use Sonnet instead of Opus"
-      echo "  $0 --engine codex         # Use Codex engine"
-      echo "  $0 --engine gemini        # Use Gemini engine"
-      echo "  $0 --plan-file MY_PLAN.md # Use custom plan file"
+      echo "  $0 --engine claude --tier Moderate --lane BUILD --stage build    # v2 invocation"
+      echo "  $0 plan                                                          # plan mode shortcut"
+      echo "  $0 --engine codex --model gpt-5.3-codex                          # debug override"
+      echo "  $0 --plan-file MY_PLAN.md                                        # custom plan file"
       echo ""
       echo "Environment variables:"
       echo "  RALPH_ENGINE=claude|codex|gemini  Default engine (default: claude)"
-      echo "  RALPH_MODEL=opus|sonnet|haiku     Default model"
+      echo "  RALPH_MODEL=<model-id>            Pre-set model (equivalent to --model; marks as explicit)"
       echo "  RALPH_MAX_STUCK=3                 Max failures before skipping task"
       echo "  RALPH_PLAN_FILE=MY_PLAN.md        Custom plan file (overridden by --plan-file)"
       exit 1
       ;;
   esac
 done
+# <<< RALPH_V2 arg-parse
 
-# Validate model after all args are parsed (ENGINE may affect what's accepted)
+# >>> RALPH_V2 resolve-model
+# Validate engine + tier, then resolve MODEL from MODEL_${ENGINE}_${TIER} unless
+# --model was explicitly provided (debug override).
+case "$ENGINE" in
+  claude|codex|gemini) ;;
+  *)
+    echo "Error: Unknown engine '$ENGINE'. Allowed: claude, codex, gemini"
+    exit 1
+    ;;
+esac
+
+if [ -n "$TIER" ]; then
+  case "$TIER" in
+    Simple|Moderate|Complex) ;;
+    *)
+      echo "Error: Invalid tier '$TIER'. Allowed: Simple, Moderate, Complex"
+      exit 1
+      ;;
+  esac
+fi
+
+if [ "$MODEL_EXPLICIT" -eq 0 ] && [ -z "$MODEL" ]; then
+  # Inherit RALPH_MODEL env var as an explicit override if set (parity with --model)
+  if [ -n "${RALPH_MODEL:-}" ]; then
+    MODEL="$RALPH_MODEL"
+    MODEL_EXPLICIT=1
+  fi
+fi
+
+if [ "$MODEL_EXPLICIT" -eq 0 ]; then
+  if [ -z "$TIER" ]; then
+    # Fall back to stage default tier from ralph-routing.conf
+    case "$STAGE" in
+      plan)      TIER="${PLAN_TIER_DEFAULT:-Moderate}" ;;
+      decompose) TIER="${DECOMPOSE_TIER_DEFAULT:-Moderate}" ;;
+      *)         TIER="${BUILD_TIER_DEFAULT:-Moderate}" ;;
+    esac
+  fi
+  _varname="MODEL_${ENGINE}_${TIER}"
+  MODEL="${!_varname:-}"
+  if [ -z "$MODEL" ]; then
+    echo "Error: ${_varname} is unset in ralph-routing.conf — cannot resolve model for engine='${ENGINE}' tier='${TIER}'"
+    exit 1
+  fi
+  echo "Resolved ${_varname} -> ${MODEL} (engine=${ENGINE} tier=${TIER} stage=${STAGE}${LANE:+ lane=${LANE}})"
+fi
+
 validate_model "$MODEL"
+# <<< RALPH_V2 resolve-model
 
 # ============================================================================
 # REMOTE BACKUP SETUP

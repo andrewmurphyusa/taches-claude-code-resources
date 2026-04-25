@@ -48,13 +48,15 @@ Select the most important task from the implementation plan, implement it correc
 
 1. Select Task
    - If NEXT-TASK.md exists at repo root, read it — that is the task for this
-     iteration
+     iteration. The orchestrator strips the `[LANE:X] [TIER:Y]` annotation
+     before writing NEXT-TASK.md, so you receive only the clean description.
    - Otherwise, open the implementation plan located in step 0b and use the
      first uncompleted task (`- [ ]`) in document order
    - Task status markers:
-     - `[ ]` — normal task, process it
+     - `[ ]` — normal task, process it. MUST carry `[LANE:X] [TIER:Y]`
+       annotations — the orchestrator auto-skips any task missing them.
      - `[x]` — completed, skip
-     - `[S]` — skipped (stuck), skip
+     - `[S]` — skipped (stuck OR malformed annotation), skip
      - `[P]` — parent container, DO NOT execute directly; its child `[ ]` tasks
        will be selected by the orchestrator
    - Only ONE task per iteration
