@@ -38,3 +38,7 @@ REPORT.accumulated.md
 # prompts for making changes to anything here
 prompts/**
 prompts/
+# Codex session captures — raw session files contain full conversation transcripts.
+# Only redacted fixture-*.jsonl copies (under skills/setup-ralph/tests/fixtures/) may be committed.
+rollout-*.jsonl
+codex-session-raw/
