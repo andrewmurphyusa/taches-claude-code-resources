@@ -1,6 +1,10 @@
 #!/bin/bash
 # capacity-gemini.sh — Gemini (Antigravity/Google) capacity fetcher for Ralph Orchestrator
 #
+# shellcheck disable=SC2034 # the four CAPACITY_* vars are set here in caller
+# scope and read by capacity-monitor.sh/orchestrator.sh after sourcing —
+# invisible to shellcheck's per-file usage analysis.
+#
 # Implements the standard capacity-script interface expected by capacity-monitor.sh:
 #   CAPACITY_5H_REMAINING_PCT     — percentage of 5-hour window remaining (0-100)
 #   CAPACITY_5H_RESET_EPOCH       — Unix epoch when 5h window resets (-1 if unknown)

@@ -181,7 +181,7 @@ _check_weekly_capacity() {
       _capacity_sleep_with_status_check 30 "$agent weekly-pause"
 
       # Re-fetch fresh capacity data (cache refreshes every 60s; 30s chunks keep it fresh)
-      if fetch_${agent}_capacity 2>/dev/null; then
+      if fetch_"${agent}"_capacity 2>/dev/null; then
         fresh_pct=$CAPACITY_WEEKLY_REMAINING_PCT
       else
         fresh_pct=$remaining_pct_weekly  # fallback to last known value on fetch failure
@@ -216,7 +216,7 @@ _compute_min_reset_epoch() {
   local agent_pct agent_epoch
 
   for _agent in $CAPACITY_AGENTS; do
-    if fetch_${_agent}_capacity 2>/dev/null; then
+    if fetch_"${_agent}"_capacity 2>/dev/null; then
       agent_pct=$CAPACITY_5H_REMAINING_PCT
       agent_epoch=$CAPACITY_5H_RESET_EPOCH
       if [ "${agent_pct:-100}" -le 0 ] 2>/dev/null && [ "${agent_epoch:-0}" -gt 0 ] 2>/dev/null; then
@@ -244,7 +244,7 @@ check_all_agent_capacity() {
 
   for _agent in $CAPACITY_AGENTS; do
     # Fetch capacity data — skip agent entirely on any failure
-    if ! fetch_${_agent}_capacity 2>/dev/null; then
+    if ! fetch_"${_agent}"_capacity 2>/dev/null; then
       continue
     fi
 

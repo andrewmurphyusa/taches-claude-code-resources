@@ -1,6 +1,10 @@
 #!/bin/bash
 # capacity-claude.sh — Claude-specific capacity fetcher for Ralph Orchestrator
 #
+# shellcheck disable=SC2034 # the four CAPACITY_* vars are set here in caller
+# scope and read by capacity-monitor.sh/orchestrator.sh after sourcing —
+# invisible to shellcheck's per-file usage analysis.
+#
 # Reads the OAuth access token from ~/.claude/.credentials.json using python3,
 # calls the Anthropic OAuth usage endpoint, caches the raw JSON response to
 # /tmp/ralph-usage-cache.json with a 60-second TTL, and populates four standard
@@ -13,8 +17,6 @@
 # Returns 0 on success, 1 on any failure (missing credentials, curl error, HTTP 401,
 # parse error). Designed to be sourced by capacity-monitor.sh, not executed directly.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -23,7 +25,6 @@ CAPACITY_CACHE_FILE="/tmp/ralph-usage-cache.json"
 CAPACITY_CACHE_TTL=60   # seconds
 CAPACITY_USAGE_URL="https://api.anthropic.com/api/oauth/usage"
 CAPACITY_BETA_HEADER="anthropic-beta: oauth-2025-04-20"
-CAPACITY_CREDS_FILE="$HOME/.claude/.credentials.json"
 
 # ============================================================================
 # Export the capacity-cache-file name for embedding in python3 snippets
@@ -56,6 +57,8 @@ except Exception:
   sys.exit(1)
 " 2>/dev/null)
 
+  # shellcheck disable=SC2181 # $? here is python3's exit status from the
+  # command substitution above, not TOKEN's assignment; no direct-check form fits.
   if [ $? -ne 0 ] || [ -z "$TOKEN" ]; then
     echo "[CAPACITY] No Claude OAuth credentials found — capacity checking skipped"
     return 1
@@ -128,6 +131,8 @@ except Exception as e:
   sys.exit(1)
 " 2>/tmp/ralph-capacity-parse-error.txt)
 
+  # shellcheck disable=SC2181 # $? here is python3's exit status from the
+  # command substitution above, not PARSE_RESULT's assignment.
   if [ $? -ne 0 ]; then
     echo "[CAPACITY] claude — JSON parse failed"
     return 1

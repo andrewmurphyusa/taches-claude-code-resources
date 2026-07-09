@@ -28,8 +28,11 @@ sed_i() {
 }
 
 # Source helpers
+# shellcheck disable=SC1091 # ORCHESTRATOR_DIR resolved at runtime; see scripts/model-config.sh
 source "$ORCHESTRATOR_DIR/scripts/model-config.sh"
+# shellcheck disable=SC1091 # ORCHESTRATOR_DIR resolved at runtime; see scripts/classify-task.sh
 source "$ORCHESTRATOR_DIR/scripts/classify-task.sh"
+# shellcheck disable=SC1091 # ORCHESTRATOR_DIR resolved at runtime; see scripts/error-handler.sh
 source "$ORCHESTRATOR_DIR/scripts/error-handler.sh"
 
 # Load optional cloud credentials from auth/*.sh (excluding .example templates)
@@ -48,7 +51,10 @@ load_cloud_credentials() {
     case "$cred_file" in
       *.example) continue ;;
     esac
-    # Source the credential file — never log its contents
+    # Source the credential file — never log its contents.
+    # Dynamic path (loops over auth/*.sh at runtime); no single fixed file to
+    # point a source= directive at.
+    # shellcheck disable=SC1090
     source "$cred_file"
     loaded=$((loaded + 1))
     echo "Loaded credentials: $(basename "$cred_file")"
@@ -200,7 +206,6 @@ fi
 STAGE="build"
 LIMIT=""
 VERBOSE=""
-PASSTHROUGH_ARGS=()
 STOP_AFTER_TIME=""   # HH:MM
 STOP_AFTER_DATE=""   # YYYY-MM-DD
 ARG_PLAN_FILE=""
@@ -539,6 +544,7 @@ if [ -n "${OVERRIDE_WEEKLY_WARN_THRESHOLD:-}" ]; then
 fi
 
 # Load capacity monitoring after overrides are exported
+# shellcheck disable=SC1091 # ORCHESTRATOR_DIR resolved at runtime; see scripts/capacity-monitor.sh
 source "$ORCHESTRATOR_DIR/scripts/capacity-monitor.sh"
 
 # ============================================================================
@@ -557,7 +563,7 @@ migrate_legacy_parent_markers() {
   fi
 
   local migrated
-  migrated=$(python3 - "$PLAN_FILE" <<'PYEOF' 2>/dev/null || echo "0")
+  migrated=$(python3 - "$PLAN_FILE" <<'PYEOF' 2>/dev/null || echo "0"
 import re, sys
 
 plan_file = sys.argv[1]
@@ -813,7 +819,7 @@ if [ "$STAGE" = "plan" ]; then
           ;;
         *)
           echo "Plan mode error — propagating exit code."
-          exit $PLAN_EXIT_CODE
+          exit "$PLAN_EXIT_CODE"
           ;;
       esac
     fi
@@ -926,7 +932,7 @@ if [ "$STAGE" = "decompose" ]; then
           ;;
         *)
           echo "Decompose mode error — propagating exit code."
-          exit $DECOMPOSE_EXIT_CODE
+          exit "$DECOMPOSE_EXIT_CODE"
           ;;
       esac
     fi
@@ -982,6 +988,7 @@ STUCK_FILE=".ralph_stuck_tracker"
 MAX_STUCK="${RALPH_MAX_STUCK:-3}"
 
 # Source stuck tracker functions (shared with ralph.sh)
+# shellcheck disable=SC1091 # ORCHESTRATOR_DIR resolved at runtime; see scripts/stuck-tracker.sh
 source "$ORCHESTRATOR_DIR/scripts/stuck-tracker.sh"
 
 # Create temp file for capturing ralph.sh output (error classification)
@@ -1106,10 +1113,12 @@ while true; do
 
   # Persist the selected model tier and engine in the stuck tracker
   CURRENT_MODEL_TIER="$selected_model"
-  echo "LAST_TASK=\"$LAST_TASK\"" > "$STUCK_FILE"
-  echo "STUCK_COUNT=$STUCK_COUNT" >> "$STUCK_FILE"
-  echo "CURRENT_MODEL_TIER=$CURRENT_MODEL_TIER" >> "$STUCK_FILE"
-  echo "CURRENT_ENGINE=$CURRENT_ENGINE" >> "$STUCK_FILE"
+  {
+    echo "LAST_TASK=\"$LAST_TASK\""
+    echo "STUCK_COUNT=$STUCK_COUNT"
+    echo "CURRENT_MODEL_TIER=$CURRENT_MODEL_TIER"
+    echo "CURRENT_ENGINE=$CURRENT_ENGINE"
+  } > "$STUCK_FILE"
 
   # Communicate selected task to Claude via NEXT-TASK.md
   echo "$clean_task" > "NEXT-TASK.md"
@@ -1260,7 +1269,7 @@ while true; do
         # All providers tried or single-engine mode — sleep until reset
         echo "All available engines exhausted — fetching fresh capacity data."
         # Invalidate stale cache for the original engine so next fetch is fresh
-        invalidate_${CURRENT_ENGINE:-claude}_capacity_cache 2>/dev/null || true
+        invalidate_"${CURRENT_ENGINE:-claude}"_capacity_cache 2>/dev/null || true
 
         # Re-fetch fresh capacity to populate CAPACITY_5H_RESET_EPOCH
         check_all_agent_capacity || true
@@ -1316,7 +1325,7 @@ while true; do
         ;;
       *)
         echo "Unknown error — propagating exit code."
-        exit $EXIT_CODE
+        exit "$EXIT_CODE"
         ;;
     esac
   fi

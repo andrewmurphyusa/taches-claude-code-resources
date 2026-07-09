@@ -2,6 +2,18 @@
 # Ralph Wiggum Loop - Autonomous AI Coding
 # Based on Geoffrey Huntley's original technique
 
+# STATUS_FILE (below) is set here but read by capacity-monitor.sh, which this
+# script sources further down — invisible to shellcheck's per-file usage
+# analysis.
+# shellcheck disable=SC2034
+
+# `local x=$(cmd)` masks cmd's exit status via `local`'s own return code — but
+# under `set -e` (below), splitting into `local x; x=$(cmd)` would let a
+# failing cmd trigger an unwanted script exit instead of falling through to
+# each call site's own `|| echo "..."` fallback. Deliberately left combined;
+# not a lint task's call to change error-handling behavior in this file.
+# shellcheck disable=SC2155
+
 set -e  # Exit on error
 
 # Resolve script directory for sourcing helpers
@@ -246,6 +258,7 @@ get_current_task() {
 # ============================================================================
 
 STUCK_FILE=".ralph_stuck_tracker"
+# shellcheck disable=SC1091 # LOOP_DIR resolved at runtime; see scripts/stuck-tracker.sh
 source "$LOOP_DIR/scripts/stuck-tracker.sh"
 
 # ============================================================================
@@ -255,6 +268,7 @@ source "$LOOP_DIR/scripts/stuck-tracker.sh"
 # Optional: orchestrator sources this already, but ralph.sh must also do it
 # so throttling works in plan mode and when ralph.sh is run directly.
 if [ -f "$LOOP_DIR/scripts/capacity-monitor.sh" ]; then
+  # shellcheck disable=SC1091 # LOOP_DIR resolved at runtime; see scripts/capacity-monitor.sh
   source "$LOOP_DIR/scripts/capacity-monitor.sh"
 else
   echo "Warning: capacity-monitor.sh not found at $LOOP_DIR/scripts/capacity-monitor.sh"
@@ -352,7 +366,7 @@ generate_report() {
 
 
   local commit_count=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-  local files_changed=$(git diff --name-only $(git rev-list --max-parents=0 HEAD 2>/dev/null) HEAD 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+  local files_changed=$(git diff --name-only "$(git rev-list --max-parents=0 HEAD 2>/dev/null)" HEAD 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 
 
   if [ -f "$REPORT_FILE" ]; then
@@ -397,42 +411,52 @@ EOF
   esac
 
   # Add completed tasks
-  echo "" >> "$REPORT_FILE"
-  echo "## Completed Tasks" >> "$REPORT_FILE"
-  echo "" >> "$REPORT_FILE"
-  grep '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[x\]/- ✓/' >> "$REPORT_FILE" || echo "None" >> "$REPORT_FILE"
+  {
+    echo ""
+    echo "## Completed Tasks"
+    echo ""
+    grep '^\s*- \[x\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[x\]/- ✓/' || echo "None"
+  } >> "$REPORT_FILE"
 
   # Add skipped tasks if any (only [S] — tasks stuck and skipped by ralph)
   if [ "$skipped" -gt 0 ]; then
-    echo "" >> "$REPORT_FILE"
-    echo "## Skipped Tasks (stuck)" >> "$REPORT_FILE"
-    echo "" >> "$REPORT_FILE"
-    grep '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[S\]/- ⚠/' >> "$REPORT_FILE"
+    {
+      echo ""
+      echo "## Skipped Tasks (stuck)"
+      echo ""
+      grep '^\s*- \[S\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[S\]/- ⚠/'
+    } >> "$REPORT_FILE"
   fi
 
   # Add parent container tasks if any (only [P] — container tasks with subtasks)
   if [ "$parents" -gt 0 ]; then
-    echo "" >> "$REPORT_FILE"
-    echo "## Parent Tasks (containers with subtasks)" >> "$REPORT_FILE"
-    echo "" >> "$REPORT_FILE"
-    grep '^\s*- \[P\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[P\]/- 📦/' >> "$REPORT_FILE"
+    {
+      echo ""
+      echo "## Parent Tasks (containers with subtasks)"
+      echo ""
+      grep '^\s*- \[P\]' "$PLAN_FILE" 2>/dev/null | sed 's/- \[P\]/- 📦/'
+    } >> "$REPORT_FILE"
   fi
 
   # Add remaining tasks if any
   if [ "$remaining" -gt 0 ]; then
-    echo "" >> "$REPORT_FILE"
-    echo "## Remaining Tasks" >> "$REPORT_FILE"
-    echo "" >> "$REPORT_FILE"
-    grep '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null >> "$REPORT_FILE"
+    {
+      echo ""
+      echo "## Remaining Tasks"
+      echo ""
+      grep '^\s*- \[ \]' "$PLAN_FILE" 2>/dev/null
+    } >> "$REPORT_FILE"
   fi
 
   # Add recent commits
-  echo "" >> "$REPORT_FILE"
-  echo "## Recent Commits" >> "$REPORT_FILE"
-  echo "" >> "$REPORT_FILE"
-  echo '```' >> "$REPORT_FILE"
-  git log --oneline -20 2>/dev/null >> "$REPORT_FILE" || echo "No git history" >> "$REPORT_FILE"
-  echo '```' >> "$REPORT_FILE"
+  {
+    echo ""
+    echo "## Recent Commits"
+    echo ""
+    echo '```'
+    git log --oneline -20 2>/dev/null || echo "No git history"
+    echo '```'
+  } >> "$REPORT_FILE"
 
   echo ""
   echo "Report saved to $REPORT_FILE"
@@ -451,7 +475,7 @@ invoke_claude() {
   [ "$VERBOSE" = "true" ] && claude_args+=("--verbose")
   cat "$PROMPT_TMP" | claude "${claude_args[@]}" 2>&1 | tee -a "$LOG_FILE"
   # PIPESTATUS[1] is claude's exit code in the cat|claude|tee pipeline
-  return ${PIPESTATUS[1]}
+  return "${PIPESTATUS[1]}"
 }
 
 invoke_codex() {
@@ -460,7 +484,7 @@ invoke_codex() {
     return 1
   fi
   codex exec --model "$MODEL" --sandbox danger-full-access "$(cat "$PROMPT_TMP")" 2>&1 | tee -a "$LOG_FILE"
-  return ${PIPESTATUS[0]}
+  return "${PIPESTATUS[0]}"
 }
 
 invoke_gemini() {
@@ -469,7 +493,7 @@ invoke_gemini() {
     return 1
   fi
   gemini --model "$MODEL" -p "$(cat "$PROMPT_TMP")" 2>&1 | tee -a "$LOG_FILE"
-  return ${PIPESTATUS[0]}
+  return "${PIPESTATUS[0]}"
 }
 
 # ============================================================================
@@ -550,6 +574,9 @@ if [ -f "$LOG_FILE" ] ; then
 fi
 
 # Initialize log file
+# shellcheck disable=SC1110 # known bug: curly quotes in the date format string
+# break the header timestamp; tracked as IMPLEMENTATION_PLAN.md T1.9, not fixed
+# here (out of scope for this lint pass).
 echo "=== Ralph Session Started $(date ‘+%Y-%m-%d %H:%M:%S’) ===" > "$LOG_FILE"
 echo "Mode: $MODE | Engine: $ENGINE | Model: $MODEL" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"

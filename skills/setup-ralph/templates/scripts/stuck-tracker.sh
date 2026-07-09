@@ -65,15 +65,20 @@ skip_stuck_task() {
   # Note: We append to end instead of inserting after header (simpler, more portable)
   if ! grep -q "^## Blocked" "$PLAN_FILE" 2>/dev/null; then
     # Create Blocked section at end
-    echo "" >> "$PLAN_FILE"
-    echo "## Blocked" >> "$PLAN_FILE"
-    echo "" >> "$PLAN_FILE"
+    {
+      echo ""
+      echo "## Blocked"
+      echo ""
+    } >> "$PLAN_FILE"
   fi
   echo "- $task (stuck after $MAX_STUCK attempts)" >> "$PLAN_FILE"
 
   # Mark the task as skipped in place (change [ ] to [S])
   # Escape regex metacharacters in task name for safe substitution
   local escaped_task escaped_replacement
+  # Single quotes are intentional: $ and & here are sed regex/backreference
+  # metacharacters, not shell variables to expand.
+  # shellcheck disable=SC2016
   escaped_task=$(printf '%s\n' "$task" | sed 's/[[\.*^$()+?{|/]/\\&/g')
   escaped_replacement=$(printf '%s\n' "$task" | sed 's/[\/&]/\\&/g')
   sed_i "s/- \[ \] ${escaped_task}/- [S] $escaped_replacement/" "$PLAN_FILE"

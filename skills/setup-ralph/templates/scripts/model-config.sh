@@ -1,6 +1,11 @@
 #!/bin/bash
 # Model configuration constants for improved-ralph orchestrator
 # These are the model tier aliases accepted by Claude Code CLI
+#
+# shellcheck disable=SC2034 # every constant below is read either by another
+# sourced script (classify-task.sh, orchestrator.sh, ralph.sh) or indirectly via
+# ${!varname} in get_model_for_tier() — both invisible to shellcheck's per-file
+# usage analysis.
 
 # ============================================================================
 # CLAUDE MODEL TIER ALIASES (backward-compatible; used with --model flag)

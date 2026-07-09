@@ -3,6 +3,10 @@
 # Classifies tasks from IMPLEMENTATION_PLAN.md into haiku/sonnet/opus tiers
 # using keyword heuristics from routing research (004)
 #
+# shellcheck disable=SC2034 # TASK_TYPE_FIT_* rows below are read via
+# ${!varname} indirect expansion in score_provider() (fit_var lookup), not by
+# literal name — invisible to shellcheck's usage analysis.
+#
 # Multi-engine mode (RALPH_MULTI_ENGINE=true):
 #   classify_task() outputs a ranked 3-tuple:
 #     "1.claude:opus 2.codex:gpt-5.3-codex 3.gemini:gemini-3.1-pro-preview"
@@ -11,6 +15,7 @@
 
 # Source model config for tier constants and upgrade_tier()
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091 # SCRIPT_DIR resolved at runtime; see model-config.sh (sibling file)
 source "$SCRIPT_DIR/model-config.sh"
 
 # ============================================================================
@@ -154,6 +159,9 @@ classify_task_multi() {
   done
 
   # Sort descending by score (numeric, highest first)
+  # shellcheck disable=SC2207 # mapfile/readarray is bash 4+, forbidden by the
+  # bash 3.2 (macOS) compatibility requirement; entries never contain
+  # whitespace (score:engine:model), so IFS=$'\n' splitting is safe here.
   IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort -t: -k1 -rn)); unset IFS
 
   # Build ranked annotation: "1.engine:model 2.engine:model 3.engine:model"
@@ -198,7 +206,7 @@ _classify_task_single() {
   # Step 1: Check for force-opus signals
   # "why" at the start of the task
   case "$task_lower" in
-    why\ *|why\ is\ *|why\ does\ *) echo "opus"; return ;;
+    why\ *) echo "opus"; return ;;
   esac
 
   # Check opus keywords using a single pattern match
@@ -312,6 +320,8 @@ strip_tier_annotation() {
   # Legacy [tier] format
   local lower
   lower=$(echo "$task" | cut -c1-8 | tr '[:upper:]' '[:lower:]')
+  # shellcheck disable=SC2001 # ${var//pattern/replacement} can't express
+  # case-insensitive bracket classes like [oO][pP][uU][sS]; sed is clearer here.
   case "$lower" in
     \[opus\]*)   echo "$task" | sed 's/^\[[oO][pP][uU][sS]\] *//' ;;
     \[sonnet\]*) echo "$task" | sed 's/^\[[sS][oO][nN][nN][eE][tT]\] *//' ;;
@@ -333,8 +343,11 @@ extract_tier_from_ranked() {
   model_id="${first_entry##*:}"
 
   # Map model ID to tier
+  # shellcheck disable=SC2221,SC2222 # known shadowing: *pro* (opus arm) vs
+  # gemini-3.1-pro* (sonnet arm) — pre-existing behavior, tracked separately
+  # in IMPLEMENTATION_PLAN.md Discovered (not in scope for this lint pass).
   case "$model_id" in
-    opus|*codex*|*pro*|*pro-preview*) echo "opus" ;;
+    opus|*codex*|*pro*) echo "opus" ;;
     sonnet|gpt-5.4|gemini-3.1-pro*)   echo "sonnet" ;;
     haiku|*mini*|*flash*)              echo "haiku" ;;
     *)                                 echo "sonnet" ;;  # safe default
