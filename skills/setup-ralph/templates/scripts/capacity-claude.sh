@@ -7,7 +7,7 @@
 #
 # Reads the OAuth access token from ~/.claude/.credentials.json using python3,
 # calls the Anthropic OAuth usage endpoint, caches the raw JSON response to
-# /tmp/ralph-usage-cache.json with a 60-second TTL, and populates four standard
+# ${RALPH_TMP_DIR:-/tmp}/ralph-usage-cache.json with a 60-second TTL, and populates four standard
 # variables:
 #   CAPACITY_5H_REMAINING_PCT     — percentage of 5-hour window remaining (0-100)
 #   CAPACITY_5H_RESET_EPOCH       — Unix epoch when 5h window resets (-1 if unknown)
@@ -21,7 +21,7 @@
 # CONSTANTS
 # ============================================================================
 
-CAPACITY_CACHE_FILE="/tmp/ralph-usage-cache.json"
+CAPACITY_CACHE_FILE="${RALPH_TMP_DIR:-/tmp}/ralph-usage-cache.json"
 CAPACITY_CACHE_TTL=60   # seconds
 CAPACITY_USAGE_URL="https://api.anthropic.com/api/oauth/usage"
 CAPACITY_BETA_HEADER="anthropic-beta: oauth-2025-04-20"
@@ -129,7 +129,7 @@ try:
 except Exception as e:
   print('ERROR', str(e), file=sys.stderr)
   sys.exit(1)
-" 2>/tmp/ralph-capacity-parse-error.txt)
+" 2>"${RALPH_TMP_DIR:-/tmp}/ralph-capacity-parse-error.txt")
 
   # shellcheck disable=SC2181 # $? here is python3's exit status from the
   # command substitution above, not PARSE_RESULT's assignment.

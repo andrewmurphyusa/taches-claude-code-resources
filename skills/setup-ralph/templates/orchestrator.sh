@@ -1195,10 +1195,10 @@ while true; do
         _default_reset_epoch=$(( _now + 18300 ))   # 5h + 5min buffer fallback
         case "${CURRENT_ENGINE:-claude}" in
           codex)
-            echo "$_default_reset_epoch" > "/tmp/ralph-codex-reset.epoch" 2>/dev/null || true
+            echo "$_default_reset_epoch" > "${RALPH_TMP_DIR:-/tmp}/ralph-codex-reset.epoch" 2>/dev/null || true
             ;;
           gemini)
-            echo "$_default_reset_epoch" > "/tmp/ralph-gemini-reset.epoch" 2>/dev/null || true
+            echo "$_default_reset_epoch" > "${RALPH_TMP_DIR:-/tmp}/ralph-gemini-reset.epoch" 2>/dev/null || true
             ;;
         esac
 

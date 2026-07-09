@@ -621,7 +621,7 @@ fi
 
 # Apply plan-file substitution and invoke the selected engine
 # Watch progress: tail -f ralph.log
-PROMPT_TMP=$(mktemp /tmp/ralph-prompt-XXXXXX.md)
+PROMPT_TMP=$(mktemp "${RALPH_TMP_DIR:-/tmp}/ralph-prompt-XXXXXX.md")
 sed "s|IMPLEMENTATION_PLAN\.md|$PLAN_FILE|g" "$PROMPT_FILE" > "$PROMPT_TMP"
 
 set +e

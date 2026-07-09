@@ -32,7 +32,7 @@
 # Designed to be sourced by capacity-monitor.sh (not executed directly).
 
 # Estimate file: persists reset epoch between runs when written by orchestrator.sh
-_CODEX_ESTIMATE_FILE="/tmp/ralph-codex-reset.epoch"
+_CODEX_ESTIMATE_FILE="${RALPH_TMP_DIR:-/tmp}/ralph-codex-reset.epoch"
 
 # ============================================================================
 # PUBLIC FUNCTIONS

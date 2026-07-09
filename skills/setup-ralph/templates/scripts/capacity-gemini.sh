@@ -17,9 +17,10 @@
 #   Actual exhaustion is detected reactively via error pattern matching in error-handler.sh.
 #
 # Phase 4 upgrade path:
-#   fetch_gemini_capacity() reads /tmp/ralph-gemini-reset.epoch (written by orchestrator.sh
-#   on USAGE_EXHAUSTED) and parses "retryDelay" from /tmp/ralph-gemini-last-error.json
-#   (written by the Gemini CLI error response) when present.
+#   fetch_gemini_capacity() reads ${RALPH_TMP_DIR:-/tmp}/ralph-gemini-reset.epoch (written by
+#   orchestrator.sh on USAGE_EXHAUSTED) and parses "retryDelay" from
+#   ${RALPH_TMP_DIR:-/tmp}/ralph-gemini-last-error.json (written by the Gemini CLI error
+#   response) when present.
 #   This is an epoch-file approach (no live query), because Gemini lacks a /status command.
 #
 # Reactive error patterns handled by error-handler.sh classify_error():
@@ -34,8 +35,8 @@
 # Designed to be sourced by capacity-monitor.sh (not executed directly).
 
 # Estimate file: persists reset epoch between runs when written by orchestrator.sh
-_GEMINI_ESTIMATE_FILE="/tmp/ralph-gemini-reset.epoch"
-_GEMINI_LAST_ERROR_FILE="/tmp/ralph-gemini-last-error.json"
+_GEMINI_ESTIMATE_FILE="${RALPH_TMP_DIR:-/tmp}/ralph-gemini-reset.epoch"
+_GEMINI_LAST_ERROR_FILE="${RALPH_TMP_DIR:-/tmp}/ralph-gemini-last-error.json"
 
 # ============================================================================
 # PUBLIC FUNCTIONS
