@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# tests/mocks/sleep — mock `sleep` for the Ralph test harness.
+# Records the requested duration(s) to $MOCK_SLEEP_LOG (one line per call)
+# and returns immediately without actually sleeping, so tests can assert on
+# requested durations (backoff, window-reset waits, etc.) instead of burning
+# real wall-clock time.
+#
+# NOTE: tests/mocks/{claude,codex,agy}'s own 'hang' MOCK_SCENARIO deliberately
+# does NOT call `sleep` for its busy-wait (see mock_hang() in _common.sh) —
+# calling it would resolve to this file (tests/mocks/ is prepended to PATH)
+# and return instantly, defeating the point of the hang scenario.
+set -u
+
+if [ -n "${MOCK_SLEEP_LOG:-}" ]; then
+  printf '%s\n' "$*" >> "$MOCK_SLEEP_LOG"
+fi
+
+exit 0

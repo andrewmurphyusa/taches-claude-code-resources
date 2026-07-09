@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# tests/mocks/claude — mock Claude Code CLI for the Ralph test harness.
+# Implements the MOCK_SCENARIO/MOCK_LOG protocol (specs/01-test-harness.md).
+# Never invokes the real `claude` binary; must never be reachable except via
+# tests/mocks/ being prepended to PATH by tests/helpers/common.bash.
+set -u
+
+MOCK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./_common.sh
+. "$MOCK_SCRIPT_DIR/_common.sh"
+
+mock_log_call "$@"
+
+mock_run "CLAUDE" \
+  "I've completed the task. All requested changes have been made." \
+  'Claude AI usage limit reached for your account. Your usage limit will reset later today.' \
+  '{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit."}}' \
+  '{"type":"error","error":{"type":"authentication_error","message":"Invalid API key provided. Please run /login."}}' \
+  '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'

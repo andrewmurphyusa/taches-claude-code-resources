@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# tests/mocks/codex — mock Codex CLI for the Ralph test harness.
+# Implements the MOCK_SCENARIO/MOCK_LOG protocol (specs/01-test-harness.md).
+# Never invokes the real `codex` binary; must never be reachable except via
+# tests/mocks/ being prepended to PATH by tests/helpers/common.bash.
+#
+# NOTE: the real invocation (ralph.sh invoke_codex) passes the prompt as a
+# positional argv element, not via stdin — mock_log_call still records
+# whatever stdin it receives (typically none/empty here), matching the
+# generic mock protocol.
+set -u
+
+MOCK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./_common.sh
+. "$MOCK_SCRIPT_DIR/_common.sh"
+
+mock_log_call "$@"
+
+mock_run "CODEX" \
+  "Mock codex: applied patch and completed the task." \
+  "You've hit your usage limit: Codex requests for the 5-hour limit reached. Try again later or upgrade your plan." \
+  "rate_limit_exceeded: Rate limit reached for requests. please slow down and try again after 20 seconds." \
+  "401 Unauthorized: authentication failed - login required. Run 'codex login' to continue." \
+  ""

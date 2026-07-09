@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# tests/mocks/agy — mock Antigravity CLI for the Ralph test harness.
+# Implements the MOCK_SCENARIO/MOCK_LOG protocol (specs/01-test-harness.md).
+# Never invokes the real `agy` binary; must never be reachable except via
+# tests/mocks/ being prepended to PATH by tests/helpers/common.bash.
+#
+# NOTE: no engine plugin invokes `agy` yet (Priority 4 / spec 04 wires up
+# scripts/engines/antigravity.sh); this mock exists ahead of that per spec
+# 01's explicit tests/mocks/{claude,codex,agy,sleep} layout. Expected
+# real invocation shape per spec 04: `agy -p "<prompt>" --model <model>`
+# (prompt via argv, like the retiring gemini CLI, not stdin).
+set -u
+
+MOCK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./_common.sh
+. "$MOCK_SCRIPT_DIR/_common.sh"
+
+mock_log_call "$@"
+
+mock_run "AGY" \
+  "Mock agy: task complete, no further action needed." \
+  "RESOURCE_EXHAUSTED: Antigravity daily quota exceeded for this account. Credits reset at 00:00 UTC." \
+  "RATE_LIMIT_EXCEEDED: Rate Limit Exceeded for Antigravity API requests. Please retry shortly." \
+  "Unauthorized: login required. Run 'agy auth login' to re-authenticate." \
+  ""
