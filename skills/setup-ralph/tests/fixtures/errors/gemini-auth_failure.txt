@@ -1,0 +1,1 @@
+Unauthorized: Gemini API key not found or invalid. Please run 'gemini auth login' to authenticate.

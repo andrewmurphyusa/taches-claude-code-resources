@@ -1,0 +1,1 @@
+RATE_LIMIT_EXCEEDED: Quota exceeded for quota metric 'GenerateContent requests per minute' and limit 'GenerateContentRequestsPerMinutePerProjectPerRegion'.

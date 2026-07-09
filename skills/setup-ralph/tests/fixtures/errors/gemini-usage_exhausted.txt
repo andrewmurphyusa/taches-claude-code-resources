@@ -1,0 +1,1 @@
+TerminalQuotaError: RESOURCE_EXHAUSTED: Gemini daily quota exceeded for this project. Quota resets at midnight UTC.

@@ -1,0 +1,1 @@
+You've hit your usage limit: Codex requests for the 5-hour limit reached. Try again later or upgrade your plan.
