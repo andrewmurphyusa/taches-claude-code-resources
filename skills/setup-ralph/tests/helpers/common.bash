@@ -17,6 +17,15 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
 
+  # On Windows, python3's os.path.expanduser("~/...") resolves via USERPROFILE
+  # (checked before HOME in CPython's ntpath.expanduser), so capacity-claude.sh's
+  # `~/.claude/.credentials.json` lookup silently ignores the HOME override above
+  # and falls through to the developer's real Windows profile — reading real
+  # OAuth credentials and making a real network call to the Anthropic usage API
+  # on every check_all_agent_capacity call. Mirroring HOME here closes that gap
+  # on Windows Git Bash; harmless no-op on Linux/macOS where USERPROFILE is unused.
+  export USERPROFILE="$HOME"
+
   # All /tmp/ralph-* style scratch files redirect under here (see T1.4).
   export RALPH_TMP_DIR="$BATS_TEST_TMPDIR/ralphtmp"
   mkdir -p "$RALPH_TMP_DIR"

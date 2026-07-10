@@ -15,6 +15,7 @@ MOCK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$MOCK_SCRIPT_DIR/_common.sh"
 
 mock_log_call "$@"
+mock_log_project_file "NEXT-TASK.md"
 
 mock_run "CODEX" \
   "Mock codex: applied patch and completed the task." \

@@ -37,6 +37,25 @@ mock_log_call() {
   fi
 }
 
+# mock_log_project_file <path>
+# If MOCK_LOG is set and <path> exists (relative to the mock's cwd — the
+# project dir ralph.sh/orchestrator.sh runs from), appends its contents to
+# $MOCK_LOG under a delimited "FILE: <path>" block. Lets integration tests
+# assert on transient per-iteration state (e.g. NEXT-TASK.md) that the
+# orchestrator's own EXIT trap deletes before a `run`-wrapped invocation
+# returns control to the test. No-op (not an error) if the file is absent —
+# callers use this to opportunistically snapshot whatever exists at call time.
+mock_log_project_file() {
+  if [ -z "${MOCK_LOG:-}" ] || [ ! -f "$1" ]; then
+    return 0
+  fi
+  {
+    echo "FILE: $1"
+    cat "$1"
+    echo "END FILE: $1"
+  } >> "$MOCK_LOG"
+}
+
 # mock_scenario_for <ENGINE_UPPER>
 # Resolves the effective scenario for this call: a per-engine override
 # (MOCK_SCENARIO_<ENGINE_UPPER>) beats the generic MOCK_SCENARIO, which
