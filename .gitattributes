@@ -1,0 +1,34 @@
+# Force LF line endings for shell scripts, regardless of the checking-out
+# machine's core.autocrlf setting.
+#
+# Why: Git for Windows' installer defaults to core.autocrlf=true. That
+# checks out LF-stored shell scripts as CRLF on disk, even though the repo
+# itself always stores LF (`git ls-files --eol` shows `i/lf w/crlf` for an
+# affected file on a stock Windows Git Bash setup). Two concrete failure
+# modes result:
+#   1. shellcheck drowns every affected file in spurious SC1017 "literal
+#      carriage return" findings that have nothing to do with the script's
+#      actual content (hit during skills/setup-ralph tests/run.sh work).
+#   2. Scripts invoked directly via their `#!/usr/bin/env bash` shebang can
+#      fail outright on Linux/macOS (a CRLF-terminated shebang line is not
+#      recognized), which would break the WSL/Linux/macOS portability
+#      requirement in skills/setup-ralph/specs/00-overview.md if any of
+#      these files were ever checked out on those platforms in this state.
+#
+# `text eol=lf` marks the path as text (enabling normalization) and forces
+# LF on checkout independent of core.autocrlf.
+
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+
+# tests/** shell helpers that have no recognizable extension but are bash
+# scripts run directly via their shebang (mock engine CLIs, and the
+# vendored bats-core executables) — extension globs above can't catch
+# these, so they're listed explicitly.
+skills/setup-ralph/tests/mocks/claude text eol=lf
+skills/setup-ralph/tests/mocks/codex text eol=lf
+skills/setup-ralph/tests/mocks/agy text eol=lf
+skills/setup-ralph/tests/mocks/sleep text eol=lf
+skills/setup-ralph/tests/vendor/bats-core/bin/bats text eol=lf
+skills/setup-ralph/tests/vendor/bats-core/libexec/bats-core/bats* text eol=lf
