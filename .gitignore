@@ -42,3 +42,6 @@ prompts/
 # Only redacted fixture-*.jsonl copies (under skills/setup-ralph/tests/fixtures/) may be committed.
 rollout-*.jsonl
 codex-session-raw/
+
+# Temporary files
+tmp*/
